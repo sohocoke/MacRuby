@@ -39,8 +39,9 @@ module IRB
       prompt = case @prompt
       when :default then DEFAULT_PROMPT % [context.object.inspect, context.line, level]
       when :simple  then SIMPLE_PROMPT
+      when :no_prompt then NO_PROMPT
       else
-        NO_PROMPT
+        @prompt  % [context.object.inspect, context.line, level]
       end
       @auto_indent && !ignore_auto_indent ? "#{prompt}#{indentation(level)}" : prompt
     end
