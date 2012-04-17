@@ -39,7 +39,7 @@ module IRB
       prompt = case @prompt
       when :default then DEFAULT_PROMPT % [context.object.inspect, context.line, level]
       when :simple  then SIMPLE_PROMPT
-      when :no_prompt then NO_PROMPT
+      when :no_prompt, nil then NO_PROMPT
       else
         @prompt  % [context.object.inspect, context.line, level]
       end
