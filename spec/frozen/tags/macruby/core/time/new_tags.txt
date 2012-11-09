@@ -1,0 +1,2 @@
+fails:Time.new handles a String second
+fails:Time.new interprets all numerals as base 10

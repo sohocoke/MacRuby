@@ -1,8 +1,9 @@
-/* 
+/*
  * MacRuby implementation of Ruby 1.9 String.
  *
  * This file is covered by the Ruby license. See COPYING for more details.
- * 
+ *
+ * Copyright (C) 2012, The MacRuby Team. All rights reserved.
  * Copyright (C) 2007-2011, Apple Inc. All rights reserved.
  * Copyright (C) 1993-2007 Yukihiro Matsumoto
  * Copyright (C) 2000 Network Applied Communication Laboratory, Inc.
@@ -52,11 +53,12 @@ extern "C" {
 
 typedef uint8_t str_flag_t;
 
-typedef struct {
+typedef struct RString {
     struct RBasic basic;
     struct rb_encoding *encoding;
     long capacity_in_bytes;
     long length_in_bytes;
+    long cached_length;
     char *bytes;
     str_flag_t flags;
 } rb_str_t;
@@ -192,8 +194,15 @@ div_round_up(long a, long b)
 void str_update_flags(rb_str_t *self);
 
 static inline void
+str_reset_cache(rb_str_t *self)
+{
+    self->cached_length = 0;
+}
+
+static inline void
 str_reset_flags(rb_str_t *self)
 {
+    str_reset_cache(self);
     self->flags = 0;
 }
 

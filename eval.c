@@ -1,8 +1,9 @@
-/* 
+/*
  * MacRuby implementation of Ruby 1.9's eval.c.
  *
  * This file is covered by the Ruby license. See COPYING for more details.
- * 
+ *
+ * Copyright (C) 2012, The MacRuby Team. All rights reserved.
  * Copyright (C) 2007-2011, Apple Inc. All rights reserved.
  * Copyright (C) 1993-2007 Yukihiro Matsumoto
  * Copyright (C) 2000 Network Applied Communication Laboratory, Inc.
@@ -356,7 +357,7 @@ VALUE
 rb_make_exception(int argc, VALUE *argv)
 {
     VALUE mesg;
-    ID exception;
+    SEL sel_exception;
     int n;
 
     mesg = Qnil;
@@ -381,11 +382,11 @@ rb_make_exception(int argc, VALUE *argv)
       case 3:
 	n = 1;
       exception_call:
-	exception = rb_intern("exception");
-	if (!rb_respond_to(argv[0], exception)) {
+	sel_exception = sel_registerName("exception");
+	mesg = rb_vm_check_call(argv[0], sel_exception, n, argv+1);
+	if (mesg == Qundef) {
 	    rb_raise(rb_eTypeError, "exception class/object expected");
 	}
-	mesg = rb_funcall(argv[0], exception, n, argv[1]);
 	break;
       default:
 	rb_raise(rb_eArgError, "wrong number of arguments");

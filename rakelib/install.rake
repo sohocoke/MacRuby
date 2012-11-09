@@ -93,10 +93,6 @@ module Installer
     "lib#{RUBY_SO_NAME}.#{NEW_RUBY_VERSION}.dylib"
   end
 
-  def static
-    "lib#{RUBY_SO_NAME}-static.a"
-  end
-
   def ruby_shebang
     "#{FRAMEWORK_USR_BIN}/#{RUBY_INSTALL_NAME}"
   end
@@ -129,30 +125,6 @@ module Installer
     "#{header_dir}/#{NEW_RUBY_PLATFORM}"
   end
 
-  def xcode_dir
-    `xcode-select -print-path`.chomp
-  end
-
-  def xcode_example_dir
-    File.expand_path "~/Documents/MacRubyExamples"
-  end
-
-  def xcode3_2_template_dir
-    '/Library/Application Support/Developer/Shared/Xcode'
-  end
-
-  def xcode3_template_dir
-    '/Library/Application Support/Developer/3.0/Xcode'
-  end
-
-  def xcode4_template_dir
-    '/Library/Developer/Xcode/Templates/Application'
-  end
-
-  def xcode_usr_bin
-    "#{xcode_dir}/usr/bin"
-  end
-
   def dest_bin
     "#{SYM_INSTDIR}/bin"
   end
@@ -167,7 +139,10 @@ end
 namespace :install do
   extend Installer
 
-  task :all => [:bin, :scripts, :lib, :ext, :headers, :doc, :man, :resources, :xcode_support]
+  task :all => [:standard, :xcode_support]
+
+  desc 'Install MacRuby without Xcode support'
+  task :standard => [:bin, :scripts, :lib, :ext, :headers, :doc, :man, :resources]
 
   desc 'Install MacRuby binaries'
   task :bin do
@@ -179,9 +154,6 @@ namespace :install do
     install 'rbconfig.rb',  arch_lib_dir,         :mode => data_mode
     install 'rbconfig.rbo', arch_lib_dir,         :mode => data_mode
     install dylib,          FRAMEWORK_USR_LIB,    :mode => prog_mode, :strip => true
-    if File.exists?(static)
-      install static,       FRAMEWORK_USR_LIB,    :mode => data_mode, :strip => true
-    end
     for link in DYLIB_ALIASES.split
       ln_sf dylib, "#{FRAMEWORK_USR_LIB}/#{link}"
     end
@@ -196,7 +168,7 @@ namespace :install do
 
     makedirs FRAMEWORK_USR_BIN
 
-    for src in Dir['bin/*']
+    for src in Dir.glob('bin/*')
       next unless File.file?(src)
       next if /\/[.#]|(\.(old|bak|orig|rej|diff|patch|core)|~|\/core)$/i =~ src
 
@@ -244,7 +216,7 @@ namespace :install do
       ext_name, sub_path = path.scan(/^ext\/(.+)\/lib\/(.+)$/)[0]
       next unless EXTENSIONS.include?(ext_name)
       sub_dir = File.dirname(sub_path)
-      install path, "#{RUBY_SITE_LIB2}/#{sub_dir}", :mode => prog_mode
+      install_recursive path, "#{RUBY_SITE_LIB2}/#{sub_dir}", :mode => prog_mode
     end
 
     puts 'Installing extension objects'
@@ -313,7 +285,7 @@ namespace :install do
       next if file.match(/^\./)
       # Except rb_nibtool & llc!
       next if file == 'rb_nibtool' or file == 'llc'
-      link = "../../../#{FRAMEWORK_USR_BIN}/#{file}"
+      link = "#{FRAMEWORK_USR_BIN}/#{file}"
       link.sub!(/#{INSTALL_VERSION}/, 'Current')
       link_dest = "#{dest_bin}/#{File.basename(file)}"
       unless File.exists?(with_destdir(link_dest))
@@ -342,30 +314,13 @@ namespace :install do
         ln_sfh link, "#{dest_man}/#{File.basename(man_set)}"
       end
     end
+
+    install_recursive 'misc/xcode4-templates', "#{FRAMEWORK_RESOURCES}/Templates", :mode => prog_mode
   end
 
   desc 'Install all Xcode related things'
-  task :xcode_support => [:nibtool, :xcode_templates, :xcode_samples]
-
-  task :nibtool do
-    puts 'Installing IB support'
-    nibtool_dir = "#{xcode_dir}/Tools/"
-    makedirs nibtool_dir
-    ln_sfh "#{FRAMEWORK_USR_BIN}/rb_nibtool", nibtool_dir
-  end
-
-  task :xcode_templates do
-    # TODO only install templates for installed Xcodes
-    puts 'Installing XCode templates'
-    makedirs xcode4_template_dir
-    install_recursive 'misc/xcode4-templates', xcode4_template_dir, :mode => prog_mode
-    install_recursive 'misc/xcode-templates', xcode3_template_dir, :mode => prog_mode
-    install_recursive 'misc/xcode-templates', xcode3_2_template_dir, :mode => prog_mode
-  end
-
-  task :xcode_samples do
-    puts 'Installing MacRuby sample projects'
-    install_recursive 'sample-macruby', xcode_example_dir, :mode => script_mode
+  task :xcode_support do
+    `/usr/local/bin/macruby_install_xcode_support`
   end
 
 end

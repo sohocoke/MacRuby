@@ -1,6 +1,7 @@
 /*
  * This file is covered by the Ruby license. See COPYING for more details.
- * 
+ *
+ * Copyright (C) 2012, The MacRuby Team. All rights reserved.
  * Copyright (C) 2009-2011, Apple Inc. All rights reserved.
  * Copyright (C) 2008-2009, Tadayoshi Funaba
  */
@@ -815,9 +816,6 @@ f_divide(VALUE self, VALUE other,
 static VALUE
 nucomp_div(VALUE self, SEL sel, VALUE other)
 {
-    if (f_zero_p(other)) {
-	rb_raise_zerodiv();
-    }
     return f_divide(self, other, f_quo, sel_quo);
 }
 
@@ -1324,10 +1322,10 @@ static VALUE
 nucomp_marshal_load(VALUE self, SEL sel, VALUE a)
 {
     get_dat1(self);
-    VALUE ary = rb_convert_type(a, T_ARRAY, "Array", "to_ary");
-    GC_WB(&dat->real, RARRAY_AT(ary, 0));
-    GC_WB(&dat->imag, RARRAY_AT(ary, 1));
-    rb_copy_generic_ivar(self, ary);
+    Check_Type(a, T_ARRAY);
+    GC_WB(&dat->real, RARRAY_AT(a, 0));
+    GC_WB(&dat->imag, RARRAY_AT(a, 1));
+    rb_copy_generic_ivar(self, a);
     return self;
 }
 
@@ -1427,7 +1425,7 @@ nucomp_to_r(VALUE self, SEL sel)
  * eps is always ignored.
  */
 static VALUE
-nucomp_rationalize(VALUE self, int argc, VALUE *argv)
+nucomp_rationalize(VALUE self, SEL sel, int argc, VALUE *argv)
 {
     rb_scan_args(argc, argv, "01", NULL);
     return nucomp_to_r(self, 0);

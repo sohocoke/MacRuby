@@ -2,7 +2,8 @@
  * MacRuby Array.
  *
  * This file is covered by the Ruby license. See COPYING for more details.
- * 
+ *
+ * Copyright (C) 2012, The MacRuby Team. All rights reserved.
  * Copyright (C) 2011, Apple Inc. All rights reserved.
  */
 
@@ -13,7 +14,7 @@
 extern "C" {
 #endif
 
-typedef struct {
+typedef struct RArray {
     struct RBasic basic;
     size_t beg;
     size_t len;
@@ -130,14 +131,6 @@ rary_push(VALUE ary, VALUE item)
     RARY(ary)->len++;
 }
 
-static inline void
-rb_ary_modify(VALUE ary)
-{
-    if (IS_RARY(ary)) {
-	rary_modify(ary);
-    }
-}
-
 static inline VALUE
 to_ary(VALUE ary)
 {
@@ -167,6 +160,7 @@ bool rary_eql_fast(rb_ary_t *ary1, rb_ary_t *ary2);
 
 // Shared implementations.
 VALUE rary_join(VALUE ary, SEL sel, int argc, VALUE *argv);
+VALUE rary_hash(VALUE ary, SEL sel);
 VALUE rary_zip(VALUE ary, SEL sel, int argc, VALUE *argv);
 VALUE rary_transpose(VALUE ary, SEL sel);
 VALUE rary_fill(VALUE ary, SEL sel, int argc, VALUE *argv);
@@ -183,6 +177,11 @@ VALUE rary_sample(VALUE ary, SEL sel, int argc, VALUE *argv);
 VALUE rary_diff(VALUE ary1, SEL sel, VALUE ary2);
 VALUE rary_and(VALUE ary1, SEL sel, VALUE ary2);
 VALUE rary_or(VALUE ary1, SEL sel, VALUE ary2);
+VALUE rary_rotate(VALUE ary, SEL sel, int argc, VALUE *argv);
+VALUE rary_rotate_bang(VALUE ary, SEL sel, int argc, VALUE *argv);
+
+VALUE rb_ary_make_hash(VALUE ary1, VALUE ary2);
+VALUE rb_ary_make_hash_by(VALUE ary);
 
 unsigned long rb_ary_hash(VALUE ary);
 VALUE rb_f_array(VALUE, SEL, VALUE);

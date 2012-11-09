@@ -1,8 +1,9 @@
-/* 
+/*
  * MacRuby Symbols.
  *
  * This file is covered by the Ruby license. See COPYING for more details.
- * 
+ *
+ * Copyright (C) 2012, The MacRuby Team. All rights reserved.
  * Copyright (C) 2010-2011, Apple Inc. All rights reserved.
  */
 
@@ -25,7 +26,7 @@ static pthread_mutex_t local_lock = PTHREAD_MUTEX_INITIALIZER;
 static CFMutableDictionaryRef sym_id = NULL, id_str = NULL;
 static long last_id = 0;
 
-typedef struct {
+typedef struct rb_sym_t {
     VALUE klass;
     VALUE str;
     ID id;
@@ -320,6 +321,20 @@ Init_PreSymbol(void)
 	CFDictionarySetValue(sym_id, (const void *)name_hash, (const void *)id);
 	CFDictionarySetValue(id_str, (const void *)id, (const void *)sym);
     }
+}
+
+/*
+ * call-seq:
+ *
+ *   sym.succ
+ *
+ * Same as <code>sym.to_s.succ.intern</code>.
+ */
+
+static VALUE
+rsym_succ(VALUE sym, SEL sel)
+{
+    return rb_str_intern(rb_str_succ(rb_sym_to_s(sym)));
 }
 
 /*
@@ -677,6 +692,19 @@ rsym_aref(VALUE sym, SEL sel, int argc, VALUE *argv)
 
 /*
  * call-seq:
+ *   sym =~ obj   -> fixnum or nil
+ *
+ * Returns <code>sym.to_s =~ obj</code>.
+ */
+
+static VALUE
+rsym_match(VALUE sym, SEL sel, VALUE other)
+{
+    return rb_str_match(rb_sym_to_s(sym), other);
+}
+
+/*
+ * call-seq:
  *   sym.upcase    => symbol
  *
  * Same as <code>sym.to_s.upcase.intern</code>.
@@ -782,6 +810,7 @@ Init_Symbol(void)
     // Undefine methods defined on NSString.
     rb_undef_method(rb_cSymbol, "to_i");
     rb_undef_method(rb_cSymbol, "to_f");
+    rb_undef_method(rb_cSymbol, "to_r");
     rb_undef_method(rb_cSymbol, "to_str");
 
     rb_objc_define_method(rb_cSymbol, "==", rsym_equal, 1);
@@ -797,10 +826,14 @@ Init_Symbol(void)
     rb_objc_define_method(rb_cSymbol, "to_sym", rsym_to_sym, 0);
     rb_objc_define_method(rb_cSymbol, "empty?", rsym_empty, 0);
     rb_objc_define_method(rb_cSymbol, "[]", rsym_aref, -1);
+    rb_objc_define_method(rb_cSymbol, "=~", rsym_match, 1);
+    rb_objc_define_method(rb_cSymbol, "match", rsym_match, 1);
     rb_objc_define_method(rb_cSymbol, "upcase", rsym_upcase, 0);
     rb_objc_define_method(rb_cSymbol, "downcase", rsym_downcase, 0);
     rb_objc_define_method(rb_cSymbol, "swapcase", rsym_swapcase, 0);
     rb_objc_define_method(rb_cSymbol, "capitalize", rsym_capitalize, 0);
+    rb_objc_define_method(rb_cSymbol, "succ", rsym_succ, 0);
+    rb_objc_define_method(rb_cSymbol, "next", rsym_succ, 0);
 
     // Cocoa primitives.
     rb_objc_install_method2((Class)rb_cSymbol, "copy",

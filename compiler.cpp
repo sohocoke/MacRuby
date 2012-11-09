@@ -2,7 +2,8 @@
  * MacRuby Compiler.
  *
  * This file is covered by the Ruby license. See COPYING for more details.
- * 
+ *
+ * Copyright (C) 2012, The MacRuby Team. All rights reserved.
  * Copyright (C) 2008-2011, Apple Inc. All rights reserved.
  */
 
@@ -171,6 +172,7 @@ RoxorCompiler::RoxorCompiler(bool _debug_mode)
     fastMinusFunc = get_function("vm_fast_minus");
     fastMultFunc = get_function("vm_fast_mult");
     fastDivFunc = get_function("vm_fast_div");
+    fastModFunc = get_function("vm_fast_mod");
     fastLtFunc = get_function("vm_fast_lt");
     fastLeFunc = get_function("vm_fast_le");
     fastGtFunc = get_function("vm_fast_gt");
@@ -2297,7 +2299,7 @@ RoxorCompiler::compile_optimized_dispatch_call(SEL sel, int argc,
 	return pn;
     }
     // Pure arithmetic operations.
-    else if (sel == selPLUS || sel == selMINUS || sel == selDIV 
+    else if (sel == selPLUS || sel == selMINUS || sel == selDIV || sel == selMOD
 	     || sel == selMULT || sel == selLT || sel == selLE 
 	     || sel == selGT || sel == selGE || sel == selEq
 	     || sel == selNeq || sel == selEqq) {
@@ -2318,6 +2320,9 @@ RoxorCompiler::compile_optimized_dispatch_call(SEL sel, int argc,
 	}
 	else if (sel == selDIV) {
 	    func = fastDivFunc;
+	}
+	else if (sel == selMOD) {
+	    func = fastModFunc;
 	}
 	else if (sel == selMULT) {
 	    func = fastMultFunc;
@@ -3668,8 +3673,8 @@ RoxorCompiler::compile_node0(NODE *node)
 		int argc = 0;
 		std::vector<Value *> arguments;
 		if (nd_type(node) == NODE_OP_ASGN1) {
-		    assert(node->nd_args->nd_body != NULL);
-		    compile_dispatch_arguments(node->nd_args->nd_body,
+		    assert(node->nd_args->nd_head != NULL);
+		    compile_dispatch_arguments(node->nd_args->nd_head,
 			    arguments,
 			    &argc);
 		}
@@ -3698,7 +3703,7 @@ RoxorCompiler::compile_node0(NODE *node)
 		BasicBlock *untouchedBB = NULL;
 		Value *tmp2;
 		NODE *value = nd_type(node) == NODE_OP_ASGN1
-		    ? node->nd_args->nd_head : node->nd_value;
+		    ? node->nd_args->nd_body : node->nd_value;
 		assert(value != NULL);
 		if (type == 0 || type == 1) {
 		    // 0 means OR, 1 means AND

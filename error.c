@@ -1,6 +1,7 @@
 /*
  * This file is covered by the Ruby license. See COPYING for more details.
- * 
+ *
+ * Copyright (C) 2012, The MacRuby Team. All rights reserved.
  * Copyright (C) 2007-2011, Apple Inc. All rights reserved.
  * Copyright (C) 1993-2007 Yukihiro Matsumoto
  */
@@ -580,12 +581,15 @@ exc_equal(VALUE exc, SEL sel, VALUE obj)
     if (rb_obj_class(exc) != rb_obj_class(obj)) {
 	SEL sel_message = sel_registerName("message");
 	SEL sel_backtrace = sel_registerName("backtrace");
-	if (!rb_vm_respond_to(obj, sel_message, false)
-		|| !rb_vm_respond_to(obj, sel_backtrace, false)) {
+
+	mesg = rb_vm_check_call(obj, sel_message, 0, NULL);
+	if (mesg == Qundef) {
 	    return Qfalse;
 	}
-	mesg = rb_vm_call(obj, sel_message, 0, NULL);
-	backtrace = rb_vm_call(obj, sel_backtrace, 0, NULL);
+	backtrace = rb_vm_check_call(obj, sel_backtrace, 0, NULL);
+	if (backtrace == Qundef) {
+	    return Qfalse;
+	}
     }
     else {
         mesg = rb_attr_get(obj, id_mesg);
@@ -745,11 +749,7 @@ static VALUE
 nometh_err_initialize(VALUE self, SEL sel, int argc, VALUE *argv)
 {
     VALUE args = (argc > 2) ? argv[--argc] : Qnil;
-    //name_err_initialize(self, sel, argc, argv);
-    if (sel == 0) {
-	sel = argc == 0 ? selInitialize : selInitialize2;
-    }
-    rb_vm_call_super(self, sel, argc, argv);
+    name_err_initialize(self, sel, argc, argv);
     rb_iv_set(self, "args", args);
     return self;
 }
@@ -1118,7 +1118,7 @@ Init_Exception(void)
     rb_objc_define_method(*(VALUE *)rb_cNameErrorMesg, "!", name_err_mesg_new, 3);
     rb_objc_define_method(rb_cNameErrorMesg, "==", name_err_mesg_equal, 1);
     rb_objc_define_method(rb_cNameErrorMesg, "to_str", name_err_mesg_to_str, 0);
-    rb_objc_define_method(rb_cNameErrorMesg, "_dump", name_err_mesg_to_str, 0);
+    rb_objc_define_method(rb_cNameErrorMesg, "_dump", name_err_mesg_to_str, 1);
     rb_objc_define_method(*(VALUE *)rb_cNameErrorMesg, "_load", name_err_mesg_load, 1);
     rb_eNoMethodError = rb_define_class("NoMethodError", rb_eNameError);
     rb_objc_define_method(rb_eNoMethodError, "initialize", nometh_err_initialize, -1);

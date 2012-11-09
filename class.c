@@ -1,8 +1,9 @@
-/* 
+/*
  * MacRuby implementation of Ruby 1.9's class.c.
  *
  * This file is covered by the Ruby license. See COPYING for more details.
- * 
+ *
+ * Copyright (C) 2012, The MacRuby Team. All rights reserved.
  * Copyright (C) 2007-2011, Apple Inc. All rights reserved.
  * Copyright (C) 1993-2007 Yukihiro Matsumoto
  * Copyright (C) 2000 Network Applied Communication Laboratory, Inc.
@@ -729,6 +730,7 @@ rb_mod_included_modules_nosuper(VALUE mod, VALUE ary)
 	for (i = 0; i < count; i++) {
 	    VALUE imod = RARRAY_AT(inc_mods, i);
 	    rb_ary_push(ary, imod);
+	    rb_ary_concat(ary, rb_mod_included_modules(imod));
 	}
     }
 }
@@ -777,6 +779,7 @@ rb_mod_included_modules(VALUE mod)
 VALUE
 rb_mod_include_p(VALUE mod, SEL sel, VALUE mod2)
 {
+    Check_Type(mod2, T_MODULE);
     return rb_ary_includes(rb_mod_included_modules(mod), mod2);
 }
 
@@ -1190,6 +1193,12 @@ rb_singleton_class(VALUE obj)
 	    klass = rb_make_metaclass(obj, RBASIC(obj)->klass);
 	    break;
     }
+
+    OBJ_INFECT(klass, obj);
+    if (OBJ_FROZEN(obj)) {
+	OBJ_FREEZE(klass);
+    }
+
     return klass;
 }
 
@@ -1240,8 +1249,10 @@ rb_scan_args(int argc, const VALUE *argv, const char *fmt, ...)
 
     if (ISDIGIT(*p)) {
 	n = *p - '0';
-	if (n > argc)
+	if (n > argc) {
+	    va_end(vargs);
 	    rb_raise(rb_eArgError, "wrong number of arguments (%d for %d)", argc, n);
+	}
 	for (i=0; i<n; i++) {
 	    var = va_arg(vargs, VALUE*);
 	    if (var) *var = argv[i];

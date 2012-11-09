@@ -3,6 +3,7 @@
 #
 # This file is covered by the Ruby license.
 #
+# Copyright (C) 2012, The MacRuby Team
 # Copyright (C) 2009-2011, Apple Inc
 
 require 'optparse'
@@ -139,12 +140,24 @@ class Deployer
     @archs
   end
 
+  def macruby_version_base
+    @macruby_version_base ||= ensure_path(File.join(@macruby_framework_path, 'Versions', @macruby_install_version))
+  end
+
   def macruby_usr
-    @macruby_usr ||= ensure_path(File.join(@macruby_framework_path, 'Versions', @macruby_install_version, 'usr'))
+    @macruby_usr ||= ensure_path(File.join(macruby_version_base, 'usr'))
   end
 
   def compile_files
     Dir.glob(File.join(app_resources, '**', '*.rb'))
+  end
+
+  def try_to_compile(source, to: obj)
+    unless File.exist?(obj) && File.mtime(obj) > File.mtime(source)
+      MacRuby::Compiler.compile_file(source, archs: app_archs)
+    end
+  rescue
+    die "Can't compile \"#{source}\""
   end
 
   def compile
@@ -152,27 +165,23 @@ class Deployer
     compile_files.each do |source|
       base = File.basename(source, '.rb')
       next if base == 'rb_main'
+
       obj = File.join(File.dirname(source), base + '.rbo')
-      if !File.exist?(obj) or File.mtime(source) > File.mtime(obj)
-        begin
-          MacRuby::Compiler.compile_file(source, archs: app_archs)
-          rm_rf(source)
-        rescue
-          die "Can't compile \"#{source}\""
-        end
-      end
+      try_to_compile(source, to: obj)
+      rm_rf(source) if File.exists?(obj) # mtime doesn't matter, MR prefers .rbo
     end
+
     fix_install_name if File.exist?(app_macruby)
   end
 
   def gem_deps_libdirs(gem_name)
     # Locate gem spec.
     require 'rubygems'
-    gemspecs = Gem.source_index.find_name(gem_name)
-    if gemspecs.size == 0
+    begin
+      gemspec = Gem::Specification::find_by_name(gem_name)
+    rescue Gem::LoadError
       die "Cannot locate gem `#{gem_name}' in #{Gem.path}"
     end
-    gemspec = gemspecs.last
 
     # Load dependencies libdirs first.
     gem_libdirs = []
@@ -193,11 +202,13 @@ class Deployer
     gems_libdirs_to_embed = @gems.map { |x| gem_deps_libdirs(x) }.flatten
 
     # Exclude unnecessary things in the MacRuby.framework copy.
-    dirs = ['bin', 'include', 'lib/libmacruby-static.a', 'share']
+    dirs = ['bin', 'include', 'lib/libmacruby-static.a', 'share', 'lib/ruby/Gems']
     dirs << 'lib/ruby' if @no_stdlib
-    dirs << 'lib/ruby/Gems'
-    relative_usr = macruby_usr.sub(/#{@macruby_framework_path}\//, '')
-    exclude_dirs = dirs.map { |dir| "--exclude='#{File.join(relative_usr,dir)}'" }
+    exclude_dirs = dirs.map { |dir| "usr/#{dir}" }
+    exclude_dirs << 'Resources/Templates' # do not include Xcode templates
+
+    relative_base = macruby_version_base.sub(/#{@macruby_framework_path}\//, '')
+    exclude_dirs.map! { |dir| "--exclude='#{File.join(relative_base,dir)}'" }
 
     # Only copy the Current version of the MacRuby.framework.
     Dir.glob(File.join(@macruby_framework_path, 'Versions/*')).select { |x|
@@ -213,12 +224,6 @@ class Deployer
     mkdir_p(app_frameworks)
     rm_rf(app_macruby)
     rsync('-rl', *exclude_dirs, @macruby_framework_path, app_frameworks)
-
-    # Rename the current version folder to Current in the MacRuby.framework
-    # copy when the AppStore validation gets an Info.plist in a symlinked
-    # folder it thinks it is a seperate target.
-    rm_rf(File.join(app_macruby, 'Versions', 'Current'))
-    mv(File.join(app_macruby, 'Versions', @macruby_install_version), File.join(app_macruby, 'Versions', 'Current'))
 
     # Orphaned symlinks prevent AppStore validation.
     rm_rf(File.join(app_macruby, 'Headers'))

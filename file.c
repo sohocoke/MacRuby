@@ -1,6 +1,7 @@
 /*
  * This file is covered by the Ruby license. See COPYING for more details.
- * 
+ *
+ * Copyright (C) 2012, The MacRuby Team. All rights reserved.
  * Copyright (C) 2007-2011, Apple Inc. All rights reserved.
  * Copyright (C) 1993-2007 Yukihiro Matsumoto
  * Copyright (C) 2000  Network Applied Communication Laboratory, Inc.
@@ -107,14 +108,9 @@ rb_get_path_check(VALUE obj, int level)
 	rb_insecure_operation();
     }
 
-    if (rb_vm_respond_to(obj, selToPath, true)) {
-	tmp = rb_vm_call(obj, selToPath, 0, NULL);
-    }
-    else {
-	tmp = rb_check_string_type(obj);
-	if (NIL_P(tmp)) {
-	    tmp = obj;
-	}
+    tmp = rb_vm_check_call(obj, selToPath, 0, NULL);
+    if (tmp == Qundef) {
+	tmp = obj;
     }
     StringValue(tmp);
 
@@ -686,6 +682,12 @@ rb_stat_inspect(VALUE self, SEL sel)
 	{"mtime",   rb_stat_mtime},
 	{"ctime",   rb_stat_ctime},
     };
+
+    struct stat* st;
+    Data_Get_Struct(self, struct stat, st);
+    if (!st) {
+        return rb_sprintf("#<%s: uninitialized>", rb_obj_classname(self));
+    }
 
     str = rb_str_buf_new2("#<");
     rb_str_buf_cat2(str, rb_obj_classname(self));
@@ -1819,12 +1821,7 @@ rb_file_s_chmod(VALUE rcv, SEL sel, int argc, VALUE *argv)
     if (argc < 1) {
         rb_raise(rb_eArgError, "wrong number of arguments (%d for 1)", argc);
     }
-    VALUE vmode = argv[0];
-    vmode = rb_check_to_integer(vmode, "to_int");
-    if (NIL_P(vmode)) {
-	rb_raise(rb_eTypeError, "chmod() takes a numeric argument");
-    }
-    int mode = NUM2INT(vmode);
+    int mode = NUM2INT(argv[0]);
 
     long n = apply2files(chmod_internal, argc - 1, &argv[1], &mode);
     return LONG2FIX(n);
@@ -1849,13 +1846,10 @@ rb_file_chmod(VALUE obj, SEL sel, VALUE vmode)
     rb_io_t *io;
 
     rb_secure(2);
-    vmode = rb_check_to_integer(vmode, "to_int");
+    int mode = NUM2INT(vmode);
 
     GetOpenFile(obj, io);
-    if (NIL_P(vmode)) {
-	rb_raise(rb_eTypeError, "chmod() takes a numeric argument");
-    }
-    if (fchmod(io->fd, FIX2INT(vmode)) == -1) {
+    if (fchmod(io->fd, mode) == -1) {
 	rb_sys_fail(RSTRING_PTR(io->path));
     }
     return INT2FIX(0);
@@ -2516,7 +2510,7 @@ realpath_rec(long *prefixlenp, VALUE *resolvedp, char *unresolved, VALUE loopche
         }
         else if (testnamelen == 2 && testname[0] == '.' && testname[1] == '.') {
             if (*prefixlenp < RSTRING_LEN(*resolvedp)) {
-                char *resolved_names = (char *)RSTRING_PTR(*resolvedp) + *prefixlenp;
+                char *resolved_names = RSTRING_PTR(*resolvedp) + *prefixlenp;
                 char *lastsep = rb_path_last_separator(resolved_names);
                 long len = lastsep ? lastsep - resolved_names : 0;
                 rb_str_set_len(*resolvedp, *prefixlenp + len);
@@ -2542,7 +2536,7 @@ realpath_rec(long *prefixlenp, VALUE *resolvedp, char *unresolved, VALUE loopche
                 struct stat sbuf;
                 int ret;
                 VALUE testpath2 = rb_str_encode_ospath(testpath);
-                ret = lstat((char *)RSTRING_PTR(testpath2), &sbuf);
+                ret = lstat(RSTRING_PTR(testpath2), &sbuf);
                 if (ret == -1) {
                     if (errno == ENOENT) {
                         if (strict || !last || *unresolved_firstsep)
@@ -2561,7 +2555,7 @@ realpath_rec(long *prefixlenp, VALUE *resolvedp, char *unresolved, VALUE loopche
                     long link_prefixlen;
                     rb_hash_aset(loopcheck, testpath, ID2SYM(resolving));
                     link = rb_file_s_readlink(rb_cFile, 0, testpath);
-                    link_prefix = (char *)RSTRING_PTR(link);
+                    link_prefix = RSTRING_PTR(link);
                     link_names = skiproot(link_prefix);
                     link_prefixlen = link_names - link_prefix;
                     if (link_prefixlen == 0) {
@@ -2608,7 +2602,7 @@ rb_realpath_internal(VALUE basedir, VALUE path, int strict)
         basedir = rb_str_dup_frozen(basedir);
     }
 
-    ptr = (char *)RSTRING_PTR(unresolved_path);
+    ptr = RSTRING_PTR(unresolved_path);
     path_names = skiproot(ptr);
     if (ptr != path_names) {
         resolved = rb_str_new(ptr, path_names - ptr);
@@ -2616,7 +2610,7 @@ rb_realpath_internal(VALUE basedir, VALUE path, int strict)
     }
 
     if (!NIL_P(basedir)) {
-        ptr = (char *)RSTRING_PTR(basedir);
+        ptr = RSTRING_PTR(basedir);
         basedir_names = skiproot(ptr);
         if (ptr != basedir_names) {
             resolved = rb_str_new(ptr, basedir_names - ptr);
@@ -2625,12 +2619,12 @@ rb_realpath_internal(VALUE basedir, VALUE path, int strict)
     }
 
     curdir = ruby_getcwd();
-    ptr = (char *)RSTRING_PTR(curdir);
+    ptr = RSTRING_PTR(curdir);
     curdir_names = skiproot(ptr);
     resolved = rb_str_new(ptr, curdir_names - ptr);
 
   root_found:
-    prefixptr = (char *)RSTRING_PTR(resolved);
+    prefixptr = RSTRING_PTR(resolved);
     prefixlen = RSTRING_LEN(resolved);
     ptr = chompdirsep(prefixptr);
     if (*ptr) {
@@ -2756,7 +2750,7 @@ rb_file_s_basename(VALUE rcv, SEL sel, int argc, VALUE *argv)
     }
     FilePathStringValue(fname);
     if (RSTRING_LEN(fname) == 0 || !*(name = RSTRING_PTR(fname))) {
-	return fname;
+	return rb_str_new3(fname);
     }
     name = skipprefix(name);
     while (isdirsep(*name))
@@ -2776,7 +2770,7 @@ rb_file_s_basename(VALUE rcv, SEL sel, int argc, VALUE *argv)
 	if (NIL_P(fext) || !(f = rmext(p, n, StringValueCStr(fext)))) {
 	    f = n;
 	}
-	if (f == RSTRING_LEN(fname)) return fname;
+	if (f == RSTRING_LEN(fname)) return rb_str_new3(fname);
     }
 
     basename = rb_str_new(p, f);
@@ -3329,7 +3323,7 @@ rb_f_test(VALUE rcv, SEL sel, int argc, VALUE *argv)
 	    return rb_file_writable_p(0, 0, argv[1]);
 
 	  case 'W':
-	    return rb_file_world_writable_p(0, 0, argv[1]);
+	    return rb_file_writable_real_p(0, 0, argv[1]);
 
 	  case 'x':
 	    return rb_file_executable_p(0, 0, argv[1]);

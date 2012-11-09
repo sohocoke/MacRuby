@@ -3,6 +3,7 @@
  *
  * This file is covered by the Ruby license. See COPYING for more details.
  *
+ * Copyright (C) 2012, The MacRuby Team. All rights reserved.
  * Copyright (C) 2007-2011, Apple Inc. All rights reserved.
  */
 
@@ -1032,6 +1033,9 @@ rb_pointer_to_obj(VALUE rcv, SEL sel)
     Data_Get_Struct(rcv, rb_vm_pointer_t, ptr);
 
     check_no_magic_cookie(ptr);
+    if (ptr->len != 0) {
+	rb_raise(rb_eRuntimeError, "This method is not support to call with the object which is created by Pointer.new");
+    }
     return (VALUE)ptr->val;
 }
 

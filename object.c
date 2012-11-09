@@ -1,8 +1,9 @@
-/* 
+/*
  * MacRuby implementation of Ruby 1.9's object.c.
  *
  * This file is covered by the Ruby license. See COPYING for more details.
- * 
+ *
+ * Copyright (C) 2012, The MacRuby Team. All rights reserved.
  * Copyright (C) 2007-2011, Apple Inc. All rights reserved.
  * Copyright (C) 1993-2007 Yukihiro Matsumoto
  * Copyright (C) 2000 Network Applied Communication Laboratory, Inc.
@@ -197,6 +198,30 @@ rb_obj_class(VALUE obj)
     return rb_class_real(CLASS_OF(obj), true);
 }
 
+/*
+ *  call-seq:
+ *     obj.singleton_class    -> class
+ *
+ *  Returns the singleton class of <i>obj</i>.  This method creates
+ *  a new singleton class if <i>obj</i> does not have it.
+ *
+ *  If <i>obj</i> is <code>nil</code>, <code>true</code>, or
+ *  <code>false</code>, it returns NilClass, TrueClass, or FalseClass,
+ *  respectively.
+ *  If <i>obj</i> is a Fixnum or a Symbol, it raises a TypeError.
+ *
+ *     Object.new.singleton_class  #=> #<Class:#<Object:0xb7ce1e24>>
+ *     String.singleton_class      #=> #<Class:String>
+ *     nil.singleton_class         #=> NilClass
+ */
+
+static VALUE
+rb_obj_singleton_class(VALUE obj, SEL sel)
+{
+    return rb_singleton_class(obj);
+}
+
+
 static void
 init_copy(VALUE dest, VALUE obj)
 {
@@ -263,7 +288,7 @@ static VALUE rb_class_s_alloc(VALUE, SEL);
 static VALUE
 rb_obj_clone_imp(VALUE obj, SEL sel)
 {
-    if (rb_special_const_p(obj)) {
+    if (rb_special_const_p(obj) || TYPE(obj) == T_SYMBOL) {
         rb_raise(rb_eTypeError, "can't clone %s", rb_obj_classname(obj));
     }
 
@@ -472,8 +497,9 @@ rb_obj_inspect(VALUE obj, SEL sel)
 	    }
 	}
     }
-    else if (!SPECIAL_CONST_P(obj) && !RCLASS_RUBY(RBASIC(obj)->klass)) {
-      return rb_str_new3(rb_vm_call(obj, selDescription, 0, 0));
+    else if (!SPECIAL_CONST_P(obj) &&
+	     !(RCLASS_RUBY(obj) || RCLASS_RUBY(RBASIC(obj)->klass))) {
+	return rb_str_new3(rb_vm_call(obj, selDescription, 0, 0));
     }
     return rb_funcall(obj, rb_intern("to_s"), 0, 0);
 }
@@ -2498,7 +2524,8 @@ convert_type(VALUE val, const char *tname, const char *method, int raise)
 //    if (!rb_obj_respond_to(val, m, Qtrue)) {
 
     SEL sel = sel_registerName(method);
-    if (!rb_vm_respond_to(val, sel, true)) {
+    VALUE result = rb_vm_check_call(val, sel, 0, NULL);
+    if (result ==  Qundef) {
 	if (raise) {
 	    rb_raise(rb_eTypeError, "can't convert %s into %s",
 		    NIL_P(val) ? "nil" :
@@ -2507,11 +2534,9 @@ convert_type(VALUE val, const char *tname, const char *method, int raise)
 		    rb_obj_classname(val), 
 		    tname);
 	}
-	else {
-	    return Qnil;
-	}
+	return Qnil;
     }
-    return rb_vm_call(val, sel, 0, NULL);
+    return result;
 }
 
 VALUE
@@ -3075,6 +3100,7 @@ Init_Object(void)
     rb_objc_define_method(rb_mKernel, "hash", rb_obj_hash, 0);
     rb_objc_define_method(rb_mKernel, "<=>", rb_obj_cmp, 1);
 
+    rb_objc_define_method(rb_mKernel, "singleton_class", rb_obj_singleton_class, 0);
     rb_objc_define_method(rb_cNSObject, "clone", rb_obj_clone_imp, 0);
     rb_objc_define_method(rb_cNSObject, "dup", rb_nsobj_dup, 0);
     rb_objc_define_method(rb_cNSObject, "__type__", rb_obj_type, 0);

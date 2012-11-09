@@ -1,6 +1,7 @@
 /*
  * This file is covered by the Ruby license. See COPYING for more details.
- * 
+ *
+ * Copyright (C) 2012, The MacRuby Team. All rights reserved.
  * Copyright (C) 2007-2011, Apple Inc. All rights reserved.
  * Copyright (C) 1993-2007 Yukihiro Matsumoto
  */
@@ -136,6 +137,7 @@ struct dump_arg {
     st_table *symbols;
     st_table *data;
     int taint;
+    int untrust;
     st_table *compat_tbl;
     VALUE wrapper;
     st_table *encodings;
@@ -192,6 +194,9 @@ w_nbyte(const char *s, int n, struct dump_arg *arg)
     if (arg->dest && RSTRING_LEN(buf) >= BUFSIZ) {
 	if (arg->taint) {
 	    OBJ_TAINT(buf);
+	}
+	if (arg->untrust) {
+	    OBJ_UNTRUST(buf);
 	}
 	rb_io_write(arg->dest, buf);
 	rb_str_resize(buf, 0);
@@ -641,8 +646,11 @@ w_object(VALUE obj, struct dump_arg *arg, int limit)
 	if (OBJ_TAINTED(obj)) {
 	    arg->taint = Qtrue;
 	}
+	if (OBJ_UNTRUSTED(obj)) {
+	    arg->untrust = Qtrue;
+	}
 
-	if (rb_obj_respond_to(obj, s_mdump, Qtrue)) {
+	if (rb_respond_to(obj, s_mdump)) {
 	    volatile VALUE v;
 
             st_add_direct(arg->data, obj, arg->data->num_entries);
@@ -654,7 +662,7 @@ w_object(VALUE obj, struct dump_arg *arg, int limit)
 	    if (hasiv) w_ivar(obj, 0, &c_arg);
 	    return;
 	}
-	if (rb_obj_respond_to(obj, s_dump, Qtrue)) {
+	if (rb_respond_to(obj, s_dump)) {
 	    VALUE v;
             st_table *ivtbl2 = 0;
             int hasiv2;
@@ -841,7 +849,7 @@ w_object(VALUE obj, struct dump_arg *arg, int limit)
 	    {
 		VALUE v;
 
-		if (!rb_obj_respond_to(obj, s_dump_data, Qtrue)) {
+		if (!rb_respond_to(obj, s_dump_data)) {
 		    rb_raise(rb_eTypeError,
 			     "no marshal_dump is defined for class %s",
 			     rb_obj_classname(obj));
@@ -888,6 +896,9 @@ dump_ensure(struct dump_arg *arg)
     arg->wrapper = 0;
     if (arg->taint) {
 	OBJ_TAINT(arg->str);
+    }
+    if (arg->untrust) {
+	OBJ_UNTRUST(arg->str);
     }
     return 0;
 }
@@ -953,7 +964,7 @@ marshal_dump(VALUE self, SEL sel, int argc, VALUE *argv)
     arg->dest = 0;
     bool got_io = false;
     if (!NIL_P(port)) {
-	if (!rb_obj_respond_to(port, s_write, Qtrue)) {
+	if (!rb_respond_to(port, s_write)) {
 type_error:
 	    rb_raise(rb_eTypeError, "instance of IO needed");
 	}
@@ -961,7 +972,7 @@ type_error:
 #if 0 // unused
 	GC_WB(&arg->dest, port);
 #endif
-	if (rb_obj_respond_to(port, s_binmode, Qtrue)) {
+	if (rb_respond_to(port, s_binmode)) {
 	    rb_funcall2(port, s_binmode, 0, 0);
 	}
 	got_io = true;
@@ -974,6 +985,7 @@ type_error:
     GC_WB(&arg->symbols, st_init_numtable());
     GC_WB(&arg->data, st_init_numtable());
     arg->taint = Qfalse;
+    arg->untrust = Qfalse;
     GC_WB(&arg->compat_tbl, st_init_numtable());
     GC_WB(&arg->wrapper, Data_Wrap_Struct(rb_cData, NULL, 0, arg));
     arg->encodings = 0;
@@ -1001,17 +1013,18 @@ struct load_arg {
     VALUE src;
     long offset;
     st_table *symbols;
-    VALUE data;
+    st_table *data;
     VALUE proc;
     int taint;
+    int untrust;
     st_table *compat_tbl;
-    VALUE compat_tbl_wrapper;
+    VALUE wrapper;
 };
 
 static void
 check_load_arg(struct load_arg *arg)
 {
-    if (!DATA_PTR(arg->compat_tbl_wrapper)) {
+    if (!DATA_PTR(arg->wrapper)) {
 	rb_raise(rb_eRuntimeError, "Marshal.load reentered");
     }
 }
@@ -1134,6 +1147,9 @@ too_short:
 	if (OBJ_TAINTED(str)) {
 	    arg->taint = Qtrue;
 	}
+	if (OBJ_UNTRUSTED(str)) {
+	     arg->untrust = Qtrue;
+	}
     }
     return str;
 }
@@ -1194,15 +1210,20 @@ r_entry(VALUE v, struct load_arg *arg)
 {
     st_data_t real_obj = (VALUE)Qundef;
     if (st_lookup(arg->compat_tbl, v, &real_obj)) {
-        rb_hash_aset(arg->data, INT2FIX(RHASH_SIZE(arg->data)), (VALUE)real_obj);
+        st_insert(arg->data, arg->data->num_entries, (st_data_t)real_obj);
     }
     else {
-        rb_hash_aset(arg->data, INT2FIX(RHASH_SIZE(arg->data)), v);
+        st_insert(arg->data, arg->data->num_entries, (st_data_t)v);
     }
     if (arg->taint) {
         OBJ_TAINT(v);
         if ((VALUE)real_obj != Qundef)
             OBJ_TAINT((VALUE)real_obj);
+    }
+    if (arg->untrust) {
+        OBJ_UNTRUST(v);
+        if ((VALUE)real_obj != Qundef)
+            OBJ_UNTRUST((VALUE)real_obj);
     }
     return v;
 }
@@ -1302,15 +1323,15 @@ r_object0(struct load_arg *arg, int *ivp, VALUE extmod)
     VALUE v = Qnil;
     int type = r_byte(arg);
     long id;
+    st_data_t link;
 
     switch (type) {
       case TYPE_LINK:
 	id = r_long(arg);
-	v = rb_hash_aref(arg->data, LONG2FIX(id));
-	check_load_arg(arg);
-	if (NIL_P(v)) {
+	if (!st_lookup(arg->data, (st_data_t)id, &link)) {
 	    rb_raise(rb_eArgError, "dump format error (unlinked)");
 	}
+	v = (VALUE)link;
 	if (arg->proc) {
 	    v = rb_funcall(arg->proc, rb_intern("call"), 1, v);
 	    check_load_arg(arg);
@@ -1405,7 +1426,7 @@ format_error:
 		d = ruby_strtod(ptr, &e);
 		d = load_mantissa(d, e, strlen(ptr) - (e - ptr));
 	    }
-	    v = DOUBLE2NUM(d);
+	    v = DBL2NUM(d);
 	    v = r_entry(v, arg);
             v = r_leave(v, arg);
 	}
@@ -1546,7 +1567,7 @@ format_error:
 	    VALUE klass = path2class(r_unique(arg));
 	    VALUE data;
 
-	    if (!rb_obj_respond_to(klass, s_load, Qtrue)) {
+	    if (!rb_respond_to(klass, s_load)) {
 		rb_raise(rb_eTypeError, "class %s needs to have method `_load'",
 			 rb_class2name(klass));
 	    }
@@ -1574,7 +1595,7 @@ format_error:
                     rb_extend_object(v, m);
                 }
             }
-	    if (!rb_obj_respond_to(v, s_mload, Qtrue)) {
+	    if (!rb_respond_to(v, s_mload)) {
 		rb_raise(rb_eTypeError, "instance of %s needs to have method `marshal_load'",
 			 rb_class2name(klass));
 	    }
@@ -1602,7 +1623,7 @@ format_error:
       case TYPE_DATA:
        {
            VALUE klass = path2class(r_unique(arg));
-           if (rb_obj_respond_to(klass, s_alloc, Qtrue)) {
+           if (rb_respond_to(klass, s_alloc)) {
 	       static int warn = Qtrue;
 	       if (warn) {
 		   rb_warn("define `allocate' instead of `_alloc'");
@@ -1618,7 +1639,7 @@ format_error:
                rb_raise(rb_eArgError, "dump format error");
            }
            v = r_entry(v, arg);
-           if (!rb_obj_respond_to(v, s_load_data, Qtrue)) {
+           if (!rb_respond_to(v, s_load_data)) {
                rb_raise(rb_eTypeError,
                         "class %s needs to have instance method `_load_data'",
                         rb_class2name(klass));
@@ -1690,13 +1711,14 @@ load(struct load_arg *arg)
 static VALUE
 load_ensure(struct load_arg *arg)
 {
-    if (!DATA_PTR(arg->compat_tbl_wrapper)) {
+    if (!DATA_PTR(arg->wrapper)) {
 	return 0;
     }
     st_free_table(arg->symbols);
+    st_free_table(arg->data);
     st_free_table(arg->compat_tbl);
-    DATA_PTR(arg->compat_tbl_wrapper) = 0;
-    arg->compat_tbl_wrapper = 0;
+    DATA_PTR(arg->wrapper) = 0;
+    arg->wrapper = 0;
     return 0;
 }
 
@@ -1727,9 +1749,8 @@ marshal_load(VALUE self, SEL sel, int argc, VALUE *argv)
 	v = rb_str_bstr(v);
 	port = v;
     }
-    else if (rb_obj_respond_to(port, s_getbyte, Qtrue)
-	    && rb_obj_respond_to(port, s_read, Qtrue)) {
-	if (rb_obj_respond_to(port, s_binmode, Qtrue)) {
+    else if (rb_respond_to(port, s_getbyte) && rb_respond_to(port, s_read)) {
+	if (rb_respond_to(port, s_binmode)) {
 	    rb_funcall2(port, s_binmode, 0, 0);
 	}
 	arg->taint = Qtrue;
@@ -1737,10 +1758,14 @@ marshal_load(VALUE self, SEL sel, int argc, VALUE *argv)
     else {
 	rb_raise(rb_eTypeError, "instance of IO needed");
     }
+    arg->untrust = OBJ_UNTRUSTED(port);
     GC_WB(&arg->src, port);
     arg->offset = 0;
+    GC_WB(&arg->symbols, st_init_numtable());
+    GC_WB(&arg->data, st_init_numtable());
     GC_WB(&arg->compat_tbl, st_init_numtable());
-    GC_WB(&arg->compat_tbl_wrapper, Data_Wrap_Struct(rb_cData, NULL, 0, arg->compat_tbl));
+    arg->proc = 0;
+    GC_WB(&arg->wrapper, Data_Wrap_Struct(rb_cData, NULL, 0, arg->compat_tbl));
 
     major = r_byte(arg);
     minor = r_byte(arg);
@@ -1755,12 +1780,7 @@ marshal_load(VALUE self, SEL sel, int argc, VALUE *argv)
 		MARSHAL_MAJOR, MARSHAL_MINOR, major, minor);
     }
 
-    GC_WB(&arg->symbols, st_init_numtable());
-    GC_WB(&arg->data, rb_hash_new());
-    if (NIL_P(proc)) {
-	arg->proc = 0;
-    }
-    else {
+    if (!NIL_P(proc)) {
 	GC_WB(&arg->proc, proc);
     }
     v = rb_ensure(load, (VALUE)arg, load_ensure, (VALUE)arg);

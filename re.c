@@ -1,8 +1,9 @@
-/* 
+/*
  * MacRuby Regular Expressions.
  *
  * This file is covered by the Ruby license. See COPYING for more details.
- * 
+ *
+ * Copyright (C) 2012, The MacRuby Team. All rights reserved.
  * Copyright (C) 2007-2011, Apple Inc. All rights reserved.
  * Copyright (C) 1993-2007 Yukihiro Matsumoto
  */
@@ -25,6 +26,7 @@ static VALUE rb_cRegexpMatcher;
 typedef struct rb_regexp {
     struct RBasic basic;
     URegularExpression *pattern;
+    int option;
     bool fixed_encoding;
 } rb_regexp_t;
 
@@ -52,6 +54,7 @@ regexp_alloc(VALUE klass, SEL sel)
     NEWOBJ(re, struct rb_regexp);
     OBJSETUP(re, klass, T_REGEXP);
     re->pattern = NULL;
+    re->option = 0;
     re->fixed_encoding = false;
     return re;
 }
@@ -89,12 +92,32 @@ regexp_finalize_imp(void *rcv, SEL sel)
     }
 }
 
-// Work around ICU limitations.
-static void
-sanitize_regexp_string(UChar **chars_p, long *chars_len_p)
+static bool
+is_octal_literal(UChar *chars, long length)
 {
-    UChar *chars = *chars_p;
-    long chars_len = *chars_len_p;
+    bool ret = false;
+    int i;
+    for(i = 0; i < length; i++) {
+	UChar c = chars[i];
+	if (!rb_isdigit(c)) {
+	    break;
+	}
+	if (c >= '8') {
+	    return false;
+	}
+	ret = true;
+    }
+
+    return ret && i >= 2;
+}
+
+static void
+replace_uchar_with_cstring(UChar *chars, const char *str, long len)
+{
+    for(int i = 0; i < len; i++) {
+	chars[i] = str[i];
+    }
+}
 
 #define copy_if_needed() \
     do { \
@@ -103,29 +126,68 @@ sanitize_regexp_string(UChar **chars_p, long *chars_len_p)
 	chars = tmp; \
     } \
     while (0)
+#define expand_buffer(buffer, buffer_size, expand_size) \
+    do { \
+	buffer = (UChar *)xrealloc(buffer, sizeof(UChar) * (buffer_size + expand_size)); \
+    } \
+    while (0)
 
-    // Replace all occurences [[:word:]] by \w.
-    UChar word_chars[10] = {'[', '[', ':', 'w', 'o', 'r', 'd', ':', ']', ']'};
+static void
+replace_regexp_string(UChar **chars_p, long *chars_len_p, const char* find, const char* replace)
+{
+    UChar *chars = *chars_p;
+    long chars_len = *chars_len_p;
+    UChar buffer[30] = {0};
     size_t pos = 0;
+
+    const long find_len = strlen(find);
+    const long replace_len = strlen(replace);
+    const long replaced_len = replace_len - find_len;
+
+    assert(find_len < 30);
+    replace_uchar_with_cstring(buffer, find, find_len);
     while (true) {
-	UChar *p = u_strFindFirst(chars + pos, chars_len - pos, word_chars, 10);
+	UChar *p = u_strFindFirst(chars + pos, chars_len - pos, buffer, find_len);
 	if (p == NULL) {
 	    break;
 	}
 	pos = p - chars;
 	copy_if_needed();
-	chars[pos] = '\\';
-	chars[pos + 1] = 'w';
-	memmove(&chars[pos + 2], &chars[pos + 10],
-		sizeof(UChar) * (chars_len - (pos + 8)));
-	chars_len -= 8;
+	if (replace_len > find_len) {
+	    expand_buffer(chars, chars_len, replaced_len);
+	}
+
+	memmove(&chars[pos + replace_len], &chars[pos + find_len],
+		sizeof(UChar) * (chars_len - (pos + find_len)));
+	replace_uchar_with_cstring(&chars[pos], replace, replace_len);
+	chars_len += replaced_len;
     }
+
+    *chars_p = chars;
+    *chars_len_p = chars_len;
+}
+
+// Work around ICU limitations.
+static void
+sanitize_regexp_string(UChar **chars_p, long *chars_len_p)
+{
+    // Replace all occurences [[:word:]] by \w.
+    replace_regexp_string(chars_p, chars_len_p, "[[:word:]]", "\\w");
+
+    // Replace all occurences \h by [0-9a-fA-F].
+    replace_regexp_string(chars_p, chars_len_p, "\\h", "[0-9a-fA-F]");
+
+    // Replace all occurences \H by [^0-9a-fA-F].
+    replace_regexp_string(chars_p, chars_len_p, "\\H", "[^0-9a-fA-F]");
+
+    UChar *chars = *chars_p;
+    long chars_len = *chars_len_p;
 
     // Replace all occurences of \n (where n is a number < 1 or > 9) by the
     // number value.
     UChar backslash_chars[] = {'\\'};
     char buf[11];
-    pos = 0;
+    size_t pos = 0;
     while (true) {
 	UChar *p = u_strFindFirst(chars + pos, chars_len - pos,
 		backslash_chars, 1);
@@ -142,7 +204,20 @@ sanitize_regexp_string(UChar **chars_p, long *chars_len_p)
 		break;
 	    }
 	    UChar c = chars[i];
-	    if (c >= '0' && c <= '9') {
+	    if (rb_isdigit(c)) {
+		if (is_octal_literal(&chars[i], chars_len)) {
+		    // Handling for octal literals.
+		    if (c > '0') {
+			// ICU need the string as octal literal \0ooo format.
+			expand_buffer(chars, chars_len, 1);
+			memmove(&chars[i + 1], &chars[i],
+				sizeof(UChar) * (chars_len - i));
+			chars[i] = '0';
+			chars_len++;
+		    }
+		    break;
+		}
+
 		assert(n < 10);
 		buf[n++] = (char)c;
 	    }
@@ -167,8 +242,6 @@ sanitize_regexp_string(UChar **chars_p, long *chars_len_p)
 	pos++;
     }
 
-#undef copy_if_needed
-
 #if 0
 printf("out:\n");
 for (int i = 0; i < chars_len; i++) {
@@ -181,9 +254,13 @@ printf("\n");
     *chars_len_p = chars_len;
 }
 
+#undef copy_if_needed
+#undef expand_buffer
+
 static bool
 init_from_string(rb_regexp_t *regexp, VALUE str, int option, VALUE *excp)
 {
+    regexp->option = option;
     option |= REGEXP_OPT_DEFAULT;
 
     RB_STR_GET_UCHARS(str, chars, chars_len);
@@ -239,6 +316,7 @@ init_from_regexp(rb_regexp_t *regexp, rb_regexp_t *from)
 	rb_raise(rb_eRegexpError, "can't clone given regexp: %s",
 		u_errorName(status));
     }
+    regexp->option = from->option;
 }
 
 static VALUE
@@ -291,6 +369,14 @@ reg_operand(VALUE s, bool check)
 		     rb_obj_classname(s));
 	}
 	return tmp;
+    }
+}
+
+static void
+rb_reg_check(VALUE re)
+{
+    if (RREGEXP(re)->pattern == NULL) {
+	rb_raise(rb_eTypeError, "uninitialized Regexp");
     }
 }
 
@@ -428,7 +514,7 @@ regexp_last_match(VALUE klass, SEL sel, int argc, VALUE *argv)
 	if (NIL_P(match)) {
 	    return Qnil;
 	}
-	const int n = match_backref_number(match, nth, true);
+	const int n = match_backref_number(match, nth, false);
 	return rb_reg_nth_match(n, match);
     }
     return match_getter();
@@ -554,6 +640,7 @@ regexp_hash(VALUE rcv, SEL sel)
 {
     const UChar *chars = NULL;
     int32_t chars_len = 0;
+    rb_reg_check(rcv);
     regexp_get_pattern(RREGEXP(rcv)->pattern, &chars, &chars_len);
 
     unsigned long code = rb_str_hash_uchars(chars, chars_len);
@@ -586,8 +673,8 @@ regexp_equal(VALUE rcv, SEL sel, VALUE other)
 	return Qfalse;
     }
 
-    assert(RREGEXP(rcv)->pattern != NULL);
-    assert(RREGEXP(other)->pattern != NULL);
+    rb_reg_check(rcv);
+    rb_reg_check(other);
 
     UErrorCode status = U_ZERO_ERROR;
 
@@ -689,7 +776,7 @@ rb_reg_matcher_new(VALUE re, VALUE str)
     OBJSETUP(matcher, rb_cRegexpMatcher, T_OBJECT);
 
     UErrorCode status = U_ZERO_ERROR;
-    assert(RREGEXP(re)->pattern != NULL);
+    rb_reg_check(re);
     URegularExpression *match_pattern = uregex_clone(RREGEXP(re)->pattern,
 	    &status);
     if (match_pattern == NULL) {
@@ -860,6 +947,7 @@ reg_match_pos(VALUE re, VALUE *strp, long pos)
 VALUE
 regexp_match(VALUE rcv, SEL sel, VALUE str)
 {
+    rb_reg_check(rcv);
     const long pos = reg_match_pos(rcv, &str, 0);
     if (pos < 0) {
 	return Qnil;
@@ -999,6 +1087,7 @@ rb_regexp_source(VALUE re)
 {
     int32_t chars_len = 0;
     const UChar *chars = NULL;
+    rb_reg_check(re);
     regexp_get_pattern(RREGEXP(re)->pattern, &chars, &chars_len);
 
     return rb_unicode_str_new(chars, chars_len);
@@ -1029,6 +1118,10 @@ regexp_source(VALUE rcv, SEL sel)
 static VALUE
 regexp_inspect(VALUE rcv, SEL sel)
 {
+    if (RREGEXP(rcv)->pattern == NULL) {
+        return rb_any_to_s(rcv);
+    }
+
     VALUE str = rb_unicode_str_new(NULL, 0);
     rb_str_append_uchar(str, '/');
 
@@ -1089,6 +1182,7 @@ regexp_to_s(VALUE rcv, SEL sel)
 {
     VALUE str = rb_str_new2("(?");
 
+    rb_reg_check(rcv);
     const uint32_t options = rb_reg_options(rcv);
     const bool mode_m = options & REGEXP_OPT_MULTILINE;
     const bool mode_i = options & REGEXP_OPT_IGNORECASE;
@@ -1138,9 +1232,8 @@ regexp_to_s(VALUE rcv, SEL sel)
 int
 rb_reg_options(VALUE re)
 {
-    assert(RREGEXP(re)->pattern != NULL);
-    UErrorCode status = U_ZERO_ERROR;
-    return uregex_flags(RREGEXP(re)->pattern, &status);
+    rb_reg_check(re);
+    return RREGEXP(re)->option;
 }
 
 static VALUE
@@ -1233,6 +1326,7 @@ static VALUE
 regexp_names(VALUE rcv, SEL sel)
 {
     // TODO
+    rb_reg_check(rcv);
     return rb_ary_new();
 }
 
@@ -1262,6 +1356,7 @@ static VALUE
 regexp_named_captures(VALUE rcv, SEL sel)
 {
     // TODO
+    rb_reg_check(rcv);
     return rb_hash_new();
 }
 
@@ -1692,9 +1787,12 @@ match_aref(VALUE rcv, SEL sel, int argc, VALUE *argv)
 
     if (NIL_P(rest)) {
 	switch (TYPE(backref)) {
+	    case T_FIXNUM:
+		if (FIX2INT(backref) < 0) {
+		    break;
+		}
 	    case T_STRING:
 	    case T_SYMBOL:
-	    case T_FIXNUM:
 		{
 		    const int pos = match_backref_number(rcv, backref, false);
 		    return rb_reg_nth_match(pos, rcv);

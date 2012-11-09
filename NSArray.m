@@ -1,8 +1,9 @@
 /*
  * MacRuby extensions to NSArray.
- * 
+ *
  * This file is covered by the Ruby license. See COPYING for more details.
  *
+ * Copyright (C) 2012, The MacRuby Team. All rights reserved.
  * Copyright (C) 2010-2011, Apple Inc. All rights reserved.
  */
 
@@ -461,8 +462,8 @@ static VALUE
 nsary_each(id rcv, SEL sel)
 {
     RETURN_ENUMERATOR(rcv, 0, 0);
-    for (id item in rcv) {
-	rb_yield(OC2RB(item));
+    for (long i = 0; i < [rcv count]; i++) {
+	rb_yield(OC2RB([rcv objectAtIndex:i]));
 	RETURN_IF_BROKEN();
     }
     return (VALUE)rcv;
@@ -472,7 +473,7 @@ static VALUE
 nsary_each_index(id rcv, SEL sel)
 {
     RETURN_ENUMERATOR(rcv, 0, 0);
-    for (long i = 0, count = [rcv count]; i < count; i++) {
+    for (long i = 0; i < [rcv count]; i++) {
 	rb_yield(LONG2NUM(i));
 	RETURN_IF_BROKEN();
     }
@@ -545,11 +546,16 @@ nsary_rindex(id rcv, SEL sel, int argc, VALUE *argv)
     if (argc == 0) {
 	RETURN_ENUMERATOR(rcv, 0, 0);
 	long i = len;
-	while (i-- >= 0) {
+	while (i-- > 0) {
 	    VALUE test = rb_yield(OC2RB([rcv objectAtIndex:i]));
 	    RETURN_IF_BROKEN();
 	    if (RTEST(test)) {
 		return LONG2NUM(i);
+	    }
+	    const long n = [rcv count];
+	    if (n < len) {
+		// Array was modified.
+		i = n;
 	    }
 	}
     }
@@ -616,6 +622,25 @@ nsary_sort(id rcv, SEL sel)
 }
 
 static VALUE
+nsary_sort_by_i(VALUE i)
+{
+    return rb_yield(i);
+}
+
+static VALUE
+nsary_sort_by_bang(id rcv, SEL sel)
+{
+    RETURN_ENUMERATOR(rcv, 0, 0);
+
+    CHECK_MUTABLE(rcv);
+    VALUE sorted = rb_objc_block_call((VALUE)rcv, sel_registerName("sort_by"), 0, 0,
+	    nsary_sort_by_i, 0);
+    TRY_MOP([rcv setArray:(id)sorted]);
+
+    return (VALUE)rcv;
+}
+
+static VALUE
 collect(id rcv)
 {
     CHECK_MUTABLE(rcv);
@@ -648,7 +673,8 @@ nsary_select(id rcv, SEL sel)
 {
     RETURN_ENUMERATOR(rcv, 0, 0);
     NSMutableArray *result = [NSMutableArray new];
-    for (id elem in rcv) {
+    for (long i = 0; i < [rcv count]; i++) {
+	id elem = [rcv objectAtIndex:i];
 	VALUE test = rb_yield(OC2RB(elem));
 	RETURN_IF_BROKEN();
 	if (RTEST(test)) {
@@ -658,6 +684,36 @@ nsary_select(id rcv, SEL sel)
     return (VALUE)result;
 }
 
+static VALUE
+nsary_select_bang(id rcv, SEL sel)
+{
+    RETURN_ENUMERATOR(rcv, 0, 0);
+    CHECK_MUTABLE(rcv);
+    NSMutableArray *result = [NSMutableArray new];
+    for (long i = 0; i < [rcv count]; i++) {
+	id elem = [rcv objectAtIndex:i];
+	VALUE test = rb_yield(OC2RB(elem));
+	RETURN_IF_BROKEN();
+	if (!RTEST(test)) {
+	    continue;
+	}
+	[result addObject:elem];
+    }
+    if ([result count] == [rcv count]) {
+	return Qnil;
+    }
+    [rcv setArray:result];
+    return (VALUE)rcv;
+}
+
+static VALUE
+nsary_keep_if(id rcv, SEL sel)
+{
+    RETURN_ENUMERATOR(rcv, 0, 0);
+    nsary_select_bang(rcv, 0);
+    return (VALUE)rcv;
+}
+
 static id
 nsary_values_at(id rcv, SEL sel, int argc, VALUE *argv)
 {
@@ -665,6 +721,11 @@ nsary_values_at(id rcv, SEL sel, int argc, VALUE *argv)
     NSMutableArray *result = [NSMutableArray new];
     for (long i = 0; i < argc; i++) {
 	long beg, len;
+	if (FIXNUM_P(argv[i])) {
+	    id entry = (id)nsary_entry(rcv, FIX2LONG(argv[i]));
+	    [result addObject:RB2OC(entry)];
+	    continue;
+	}
 	switch (rb_range_beg_len(argv[i], &beg, &len, rcvlen, 0)) {
 	    // Check if Range.
 	    case Qfalse:
@@ -755,7 +816,8 @@ static VALUE
 nsary_delete_if(id rcv, SEL sel)
 {
     RETURN_ENUMERATOR(rcv, 0, 0);
-    return reject(rcv);
+    reject(rcv);
+    return (VALUE)rcv;
 }
 
 static VALUE
@@ -764,7 +826,7 @@ nsary_reject(id rcv, SEL sel)
     RETURN_ENUMERATOR(rcv, 0, 0);
     NSMutableArray *result = [NSMutableArray arrayWithArray:rcv];
     reject(result);
-    return (VALUE)rcv;
+    return (VALUE)result;
 }
 
 static VALUE
@@ -868,24 +930,53 @@ nsary_times(id rcv, SEL sel, VALUE times)
     return result;
 }
 
+static int
+nsary_push_value(st_data_t key, st_data_t val, st_data_t ary)
+{
+    rb_ary_push((VALUE)ary, (VALUE)val);
+    return ST_CONTINUE;
+}
+
 static VALUE
 nsary_uniq_bang(id rcv, SEL sel)
 {
     CHECK_MUTABLE(rcv);
+    VALUE hash;
     long len = [rcv count];
     bool changed = false;
-    for (long i = 0; i < len; i++) {
-	id elem = [rcv objectAtIndex:i];
-	NSRange range = NSMakeRange(i + 1, len - i - 1);
-	NSUInteger index;
-	while ((index = [rcv indexOfObject:elem inRange:range]) != NSNotFound) {
-	    TRY_MOP([rcv removeObjectAtIndex:index]);
-	    range.location = index;
-	    range.length = --len - index;
-	    changed = true;
+    if (len <= 1) {
+	return Qnil;
+    }
+
+    NSMutableArray *result = [NSMutableArray new];
+    if (rb_block_given_p()) {
+	hash = rb_ary_make_hash_by((VALUE)rcv);
+	if (len == RHASH_SIZE(hash)) {
+	    return Qnil;
+	}
+	st_foreach(RHASH_TBL(hash), nsary_push_value, (st_data_t)result);
+	changed = true;
+    }
+    else {
+	hash = rb_ary_make_hash((VALUE)rcv, 0);
+	if (len == RHASH_SIZE(hash)) {
+	    return Qnil;
+	}
+	for (long i = 0; i < len; i++) {
+	    id elem = [rcv objectAtIndex:i];
+	    st_data_t vv = (st_data_t)OC2RB(elem);
+	    if (st_delete(RHASH_TBL(hash), &vv, 0)) {
+		[result addObject:elem];
+		changed = true;
+	    }
 	}
     }
-    return changed ? (VALUE)rcv : Qnil;
+
+    if (!changed) {
+	return Qnil;
+    }
+    [rcv setArray:result];
+    return (VALUE)rcv;
 }
 
 static id 
@@ -1023,11 +1114,14 @@ Init_NSArray(void)
     rb_objc_define_method(rb_cArray, "reverse!", nsary_reverse_bang, 0);
     rb_objc_define_method(rb_cArray, "sort", nsary_sort, 0);
     rb_objc_define_method(rb_cArray, "sort!", nsary_sort_bang, 0);
+    rb_objc_define_method(rb_cArray, "sort_by!", nsary_sort_by_bang, 0);
     rb_objc_define_method(rb_cArray, "collect", nsary_collect, 0);
     rb_objc_define_method(rb_cArray, "collect!", nsary_collect_bang, 0);
     rb_objc_define_method(rb_cArray, "map", nsary_collect, 0);
     rb_objc_define_method(rb_cArray, "map!", nsary_collect_bang, 0);
     rb_objc_define_method(rb_cArray, "select", nsary_select, 0);
+    rb_objc_define_method(rb_cArray, "select!", nsary_select_bang, 0);
+    rb_objc_define_method(rb_cArray, "keep_if", nsary_keep_if, 0);
     rb_objc_define_method(rb_cArray, "values_at", nsary_values_at, -1);
     rb_objc_define_method(rb_cArray, "delete", nsary_delete, 1);
     rb_objc_define_method(rb_cArray, "delete_at", nsary_delete_at, 1);
@@ -1056,6 +1150,7 @@ Init_NSArray(void)
     rb_objc_define_method(rb_cArray, "&", rary_and, 1);
     rb_objc_define_method(rb_cArray, "|", rary_or, 1);
     rb_objc_define_method(rb_cArray, "join", rary_join, -1);
+    rb_objc_define_method(rb_cArray, "hash", rary_hash, 0);
     rb_objc_define_method(rb_cArray, "zip", rary_zip, -1);
     rb_objc_define_method(rb_cArray, "transpose", rary_transpose, 0);
     rb_objc_define_method(rb_cArray, "fill", rary_fill, -1);
@@ -1069,6 +1164,8 @@ Init_NSArray(void)
     rb_objc_define_method(rb_cArray, "permutation", rary_permutation, -1);
     rb_objc_define_method(rb_cArray, "cycle", rary_cycle, -1);
     rb_objc_define_method(rb_cArray, "sample", rary_sample, -1);
+    rb_objc_define_method(rb_cArray, "rotate", rary_rotate, -1);
+    rb_objc_define_method(rb_cArray, "rotate!", rary_rotate_bang, -1);
 }
 
 // MRI compatibility API.
@@ -1112,6 +1209,17 @@ rb_ary_elt(VALUE ary, long offset)
 	}
     }
     return Qnil;
+}
+
+void
+rb_ary_elt_set(VALUE ary, long offset, VALUE item)
+{
+    if (IS_RARY(ary)) {
+	rary_elt_set(ary, offset, item);
+    }
+    else {
+	TRY_MOP([(id)ary replaceObjectAtIndex:(NSUInteger)offset withObject:RB2OC(item)]);
+    }
 }
 
 VALUE
@@ -1221,6 +1329,17 @@ rb_ary_join(VALUE ary, VALUE sep)
         OBJ_UNTRUST(result);
     }
     return result;
+}
+
+void
+rb_ary_modify(VALUE ary)
+{
+    if (IS_RARY(ary)) {
+	rary_modify(ary);
+    }
+    else {
+	CHECK_MUTABLE((id)ary);
+    }
 }
 
 VALUE
@@ -1457,32 +1576,29 @@ rb_ary_ptr(VALUE ary)
     return values;
 }
 
-// A very naive hashing function for arrays, which hashes the array's length,
-// then first and last elements (in case the array has more than 4 elements).
-// We cannot rely on the CoreFoundation hashing function for arrays as it's
-// simply returning the number of elements, and can trigger huge performance
-// problems when using same-sized arrays as keys in Hash objects.
+static unsigned long
+recursive_hash(VALUE ary, VALUE dummy, int recur)
+{
+    long i;
+    st_index_t h;
+    VALUE n;
+
+    h = rb_hash_start(RARRAY_LEN(ary));
+    if (recur) {
+	h = rb_hash_uint(h, NUM2LONG(rb_hash(rb_cArray)));
+    }
+    else {
+	for (i=0; i<RARRAY_LEN(ary); i++) {
+	    n = rb_hash(RARRAY_PTR(ary)[i]);
+	    h = rb_hash_uint(h, NUM2LONG(n));
+	}
+    }
+    h = rb_hash_end(h);
+    return h;
+}
+
 unsigned long
 rb_ary_hash(VALUE ary)
 {
-    const long len = RARRAY_LEN(ary);
-    unsigned long hash = 0;
-    if (len > 0) {
-	VALUE elem = RARRAY_AT(ary, 0);
-	if (elem == ary) {
-	    // recursive array
-	    return (unsigned long)rb_cRubyArray;
-	}
-	hash += rb_hash_code(elem);
-	if (len > 4) {
-	    elem = RARRAY_AT(ary, len - 1);
-	    if (elem == ary) {
-		// recursive array
-		return (unsigned long)rb_cRubyArray;
-	    }
-	    hash = (hash >> 3) ^ rb_hash_code(elem);
-	}
-	hash += len;
-    }
-    return hash;
+    return rb_exec_recursive_outer(recursive_hash, ary, 0);
 }

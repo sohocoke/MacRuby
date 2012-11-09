@@ -2,7 +2,8 @@
  * MacRuby Dispatcher.
  *
  * This file is covered by the Ruby license. See COPYING for more details.
- * 
+ *
+ * Copyright (C) 2012, The MacRuby Team. All rights reserved.
  * Copyright (C) 2008-2011, Apple Inc. All rights reserved.
  */
 
@@ -393,7 +394,7 @@ extern "C"
 void *
 rb_vm_undefined_imp(void *rcv, SEL sel)
 {
-    method_missing((VALUE)rcv, sel, NULL, NULL, NULL, METHOD_MISSING_DEFAULT);
+    method_missing((VALUE)rcv, sel, NULL, 0, NULL, METHOD_MISSING_DEFAULT);
     return NULL; // never reached
 }
 
@@ -401,7 +402,7 @@ extern "C"
 void *
 rb_vm_removed_imp(void *rcv, SEL sel)
 {
-    method_missing((VALUE)rcv, sel, NULL, NULL, NULL, METHOD_MISSING_DEFAULT);
+    method_missing((VALUE)rcv, sel, NULL, 0, NULL, METHOD_MISSING_DEFAULT);
     return NULL; // never reached
 }
 
@@ -605,6 +606,18 @@ recache:
 	Method method;
 	if (opt & DISPATCH_SUPER) {
 	    if (!sel_equal(klass, current_super_sel, sel)) {
+		const char *selname = sel_getName(sel);
+		const size_t selname_len = strlen(selname);
+		char buf[100];
+		if (argc == 0 && selname[selname_len - 1] == ':') {
+		    strlcpy(buf, selname, sizeof buf);
+		    buf[selname_len - 1] = '\0';
+		    sel = sel_registerName(buf);
+		}
+		else if (argc > 0 && selname[selname_len - 1] != ':') {
+		    snprintf(buf, sizeof buf, "%s:", selname);
+		    sel = sel_registerName(buf);
+		}
 		current_super_sel = sel;
 		current_super_class = klass;
 	    }
@@ -696,7 +709,7 @@ recache2:
 	    // Let's see if are not trying to call a Ruby method that accepts
 	    // a regular argument then an optional Hash argument, to be
 	    // compatible with the Ruby specification.
-	    const char *selname = (const char *)sel;
+	    const char *selname = sel_getName(sel);
 	    size_t selname_len = strlen(selname);
 	    if (argc > 1) {
 		const char *p = strchr(selname, ':');
@@ -1146,7 +1159,7 @@ vm_block_eval(RoxorVM *vm, rb_vm_block_t *b, SEL sel, VALUE self,
 		&& (arity.min > 1
 		    || (arity.min == 1 && arity.min != arity.max))) {
 	    // Expand the array.
-	    const long ary_len = RARRAY_LEN(argv[0]);
+	    const int ary_len = RARRAY_LENINT(argv[0]);
 	    if (ary_len > 0) {
 		new_argv = (VALUE *)RARRAY_PTR(argv[0]);
 	    }

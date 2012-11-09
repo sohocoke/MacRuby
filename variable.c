@@ -1,6 +1,7 @@
 /* 
  * This file is covered by the Ruby license. See COPYING for more details.
- * 
+ *
+ * Copyright (C) 2012, The MacRuby Team. All rights reserved.
  * Copyright (C) 2007-2011, Apple Inc. All rights reserved.
  * Copyright (C) 1993-2007 Yukihiro Matsumoto
  * Copyright (C) 2000  Network Applied Communication Laboratory, Inc.
@@ -1491,7 +1492,7 @@ retry:
 	    for (i = 0; i < count; i++) {
 		VALUE mod = RARRAY_AT(inc_mods, i);
 		iv_dict = rb_class_ivar_dict(mod);
-		if (CFDictionaryGetValueIfPresent(iv_dict, (const void *)id,
+		if (iv_dict != NULL && CFDictionaryGetValueIfPresent(iv_dict, (const void *)id,
 			    (const void **)&value)) {
  		    if (value == Qundef) {
 			if (!RTEST(rb_autoload_load(mod, id))) {
@@ -1704,7 +1705,7 @@ rb_const_defined_0(VALUE klass, ID id, int exclude, int recurse)
 	    int i, count = RARRAY_LEN(inc_mods);
 	    for (i = 0; i < count; i++) {
 		iv_dict = rb_class_ivar_dict(RARRAY_AT(inc_mods, i));
-		if (CFDictionaryGetValueIfPresent(iv_dict, (const void *)id, (const void **)&value))
+		if (iv_dict != NULL && CFDictionaryGetValueIfPresent(iv_dict, (const void *)id, (const void **)&value))
 		    return Qtrue;
 	    }
 	}

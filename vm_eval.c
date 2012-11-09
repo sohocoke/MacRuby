@@ -1,6 +1,7 @@
 /*
  * This file is covered by the Ruby license. See COPYING for more details.
- * 
+ *
+ * Copyright (C) 2012, The MacRuby Team. All rights reserved.
  * Copyright (C) 2007-2011, Apple Inc. All rights reserved.
  * Copyright (C) 1993-2007 Yukihiro Matsumoto
  * Copyright (C) 2000  Network Applied Communication Laboratory, Inc.
@@ -77,7 +78,7 @@ rb_apply(VALUE recv, ID mid, VALUE args)
     int argc;
     VALUE *argv;
 
-    argc = RARRAY_LEN(args);	/* Assigns LONG, but argc is INT */
+    argc = RARRAY_LENINT(args);
     argv = ALLOCA_N(VALUE, argc);
     MEMCPY(argv, RARRAY_PTR(args), VALUE, argc);
     return rb_call(recv, mid, argc, argv, CALL_FCALL, false);
@@ -219,7 +220,7 @@ rb_yield_splat(VALUE values)
     if (NIL_P(tmp)) {
         rb_raise(rb_eArgError, "not an array");
     }
-    return rb_vm_yield(RARRAY_LEN(tmp), RARRAY_PTR(tmp));
+    return rb_vm_yield(RARRAY_LENINT(tmp), RARRAY_PTR(tmp));
 }
 
 static VALUE
@@ -337,7 +338,7 @@ specific_eval(int argc, VALUE *argv, VALUE klass, VALUE self)
 		    argc);
         }
 	rb_vm_set_current_scope(klass, SCOPE_PUBLIC);
-        retval = rb_vm_yield_under(klass, self, 0, NULL);
+        retval = rb_vm_yield_under(klass, self, 1, &self);
     }
     else {
 	const char *file = "(eval)";
@@ -460,7 +461,7 @@ rb_eval_cmd(VALUE cmd, VALUE arg, int level)
 
     if (TYPE(cmd) != T_STRING) {
 	rb_set_safe_level_force(level);
-	val = rb_funcall2(cmd, rb_intern("call"), RARRAY_LEN(arg),
+	    val = rb_funcall2(cmd, rb_intern("call"), RARRAY_LENINT(arg),
 		RARRAY_PTR(arg));
 	rb_set_safe_level_force(safe);
 	return val;
@@ -500,7 +501,7 @@ rb_obj_instance_eval_imp(VALUE self, SEL sel, VALUE top, int argc, VALUE *argv)
     VALUE klass;
 
     if (SPECIAL_CONST_P(self) || CLASS_OF(self) == rb_cSymbol) {
-	klass = 0;
+	klass = Qnil;
     }
     else {
 	klass = rb_singleton_class(self);
@@ -540,7 +541,7 @@ rb_obj_instance_exec(VALUE self, SEL sel, int argc, VALUE *argv)
     VALUE klass;
 
     if (SPECIAL_CONST_P(self)) {
-	klass = 0;
+	klass = Qnil;
     }
     else {
 	klass = rb_singleton_class(self);
@@ -681,8 +682,15 @@ rb_throw_obj(VALUE tag, VALUE val)
  */
 
 static VALUE
-rb_f_catch(VALUE rcv, SEL sel, VALUE tag)
+rb_f_catch(VALUE rcv, SEL sel, int argc, VALUE *argv)
 {
+    VALUE tag;
+    if (argc == 0) {
+	tag = rb_obj_alloc(rb_cObject);
+    }
+    else {
+	rb_scan_args(argc, argv, "01", &tag);
+    }
     return rb_vm_catch(tag);
 }
 
@@ -750,7 +758,7 @@ rb_make_backtrace(void)
 void
 Init_vm_eval(void)
 {
-    rb_objc_define_module_function(rb_mKernel, "catch", rb_f_catch, 1);
+    rb_objc_define_module_function(rb_mKernel, "catch", rb_f_catch, -1);
     rb_objc_define_module_function(rb_mKernel, "throw", rb_f_throw, -1);
 
     rb_objc_define_module_function(rb_mKernel, "loop", rb_f_loop, 0);

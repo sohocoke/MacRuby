@@ -1,6 +1,7 @@
 /*
  * This file is covered by the Ruby license. See COPYING for more details.
  *
+ * Copyright (C) 2012, The MacRuby Team. All rights reserved.
  * Copyright (C) 2007-2011, Apple Inc. All rights reserved.
  * Copyright (C) 1993-2007 Yukihiro Matsumoto
  */
@@ -115,6 +116,25 @@ range_exclude_end_p(VALUE range, SEL sel)
     return EXCL(range) ? Qtrue : Qfalse;
 }
 
+static VALUE
+recursive_equal(VALUE range, VALUE obj, int recur)
+{
+    if (recur) {
+	return Qtrue; /* Subtle! */
+    }
+    if (!rb_equal(RANGE_BEG(range), RANGE_BEG(obj))) {
+	return Qfalse;
+    }
+    if (!rb_equal(RANGE_END(range), RANGE_END(obj))) {
+	return Qfalse;
+    }
+
+    if (EXCL(range) != EXCL(obj)) {
+	return Qfalse;
+    }
+    return Qtrue;
+}
+
 
 /*
  *  call-seq:
@@ -140,18 +160,7 @@ range_eq(VALUE range, SEL sel, VALUE obj)
 	return Qfalse;
     }
 
-    if (!rb_equal(RANGE_BEG(range), RANGE_BEG(obj))) {
-	return Qfalse;
-    }
-    if (!rb_equal(RANGE_END(range), RANGE_END(obj))) {
-	return Qfalse;
-    }
-
-    if (EXCL(range) != EXCL(obj)) {
-	return Qfalse;
-    }
-
-    return Qtrue;
+    return rb_exec_recursive(recursive_equal, range, obj);
 }
 
 static int
@@ -182,6 +191,24 @@ r_le(VALUE a, VALUE b)
     return Qfalse;
 }
 
+static VALUE
+recursive_eql(VALUE range, VALUE obj, int recur)
+{
+    if (recur) {
+	return Qtrue; /* Subtle! */
+    }
+    if (!rb_eql(RANGE_BEG(range), RANGE_BEG(obj))) {
+	return Qfalse;
+    }
+    if (!rb_eql(RANGE_END(range), RANGE_END(obj))) {
+	return Qfalse;
+    }
+
+    if (EXCL(range) != EXCL(obj)) {
+	return Qfalse;
+    }
+    return Qtrue;
+}
 
 /*
  *  call-seq:
@@ -206,19 +233,26 @@ range_eql(VALUE range, SEL sel, VALUE obj)
     if (!rb_obj_is_kind_of(obj, rb_cRange)) {
 	return Qfalse;
     }
+    return rb_exec_recursive(recursive_eql, range, obj);
+}
 
-    if (!rb_eql(RANGE_BEG(range), RANGE_BEG(obj))) {
-	return Qfalse;
-    }
-    if (!rb_eql(RANGE_END(range), RANGE_END(obj))) {
-	return Qfalse;
-    }
+static VALUE
+recursive_hash(VALUE range, VALUE dummy, int recur)
+{
+    st_index_t hash = EXCL(range);
+    VALUE v;
 
-    if (EXCL(range) != EXCL(obj)) {
-	return Qfalse;
+    hash = rb_hash_start(hash);
+    if (!recur) {
+	v = rb_hash(RANGE_BEG(range));
+	hash = rb_hash_uint(hash, NUM2LONG(v));
+	v = rb_hash(RANGE_END(range));
+	hash = rb_hash_uint(hash, NUM2LONG(v));
     }
+    hash = rb_hash_uint(hash, EXCL(range) << 24);
+    hash = rb_hash_end(hash);
 
-    return Qtrue;
+    return LONG2FIX(hash);
 }
 
 /*
@@ -233,18 +267,7 @@ range_eql(VALUE range, SEL sel, VALUE obj)
 static VALUE
 range_hash(VALUE range, SEL sel)
 {
-    st_index_t hash = EXCL(range);
-    VALUE v;
-
-    hash = rb_hash_start(hash);
-    v = rb_hash(RANGE_BEG(range));
-    hash = rb_hash_uint(hash, NUM2LONG(v));
-    v = rb_hash(RANGE_END(range));
-    hash = rb_hash_uint(hash, NUM2LONG(v));
-    hash = rb_hash_uint(hash, EXCL(range) << 24);
-    hash = rb_hash_end(hash);
-
-    return LONG2FIX(hash);
+    return rb_exec_recursive_outer(recursive_hash, range, 0);
 }
 
 static VALUE
@@ -318,7 +341,7 @@ static int
 discrete_object_p(VALUE obj)
 {
     if (rb_obj_is_kind_of(obj, rb_cTime)) return FALSE; /* until Time#succ removed */
-    return rb_vm_respond_to(obj, selSucc, true);
+    return rb_vm_respond_to(obj, selSucc, false);
 }
 
 
@@ -805,6 +828,24 @@ range_to_s(VALUE range, SEL sel)
     return str;
 }
 
+static VALUE
+inspect_range(VALUE range, VALUE dummy, int recur)
+{
+    VALUE str, str2;
+
+    if (recur) {
+	return rb_str_new2(EXCL(range) ? "(... ... ...)" : "(... .. ...)");
+    }
+    str = rb_inspect(RANGE_BEG(range));
+    str2 = rb_inspect(RANGE_END(range));
+    str = rb_str_dup(str);
+    rb_str_cat(str, "...", EXCL(range) ? 3 : 2);
+    rb_str_append(str, str2);
+    OBJ_INFECT(str, str2);
+
+    return str;
+}
+
 /*
  * call-seq:
  *   rng.inspect  -> string
@@ -818,16 +859,7 @@ range_to_s(VALUE range, SEL sel)
 static VALUE
 range_inspect(VALUE range, SEL sel)
 {
-    VALUE str, str2;
-
-    str = rb_inspect(RANGE_BEG(range));
-    str2 = rb_inspect(RANGE_END(range));
-    str = rb_str_dup(str);
-    rb_str_cat(str, "...", EXCL(range) ? 3 : 2);
-    rb_str_append(str, str2);
-    OBJ_INFECT(str, str2);
-
-    return str;
+    return rb_exec_recursive(inspect_range, range, 0);
 }
 
 /*

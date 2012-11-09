@@ -1,7 +1,19 @@
+# 0.13
+ * Move the MacRuby Samples to https://github.com/MacRuby/MacRubySamples
+ * MacRuby Xcode integration can now be re-installed (GH-90)
+
+```bash
+$ sudo /usr/local/bin/macruby_install_xcode_support
+```
+
+  * Upgrade RubyGems to version 1.8.24
+  * Upgrade json to version 1.7.5
+
 # 0.12
 
 MacRuby 0.12 was a milestone release...
 
+ * Changed `RUBY_AUTHOR` to "The MacRuby Team"
  * Add support for XCode 4.3
  * Drop support for XCode 4.2 and earlier
  * Upgrade to RubyGems 1.8.20

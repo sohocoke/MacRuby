@@ -1,8 +1,9 @@
 /*
  * MacRuby extensions to NSDictionary.
- * 
+ *
  * This file is covered by the Ruby license. See COPYING for more details.
  *
+ * Copyright (C) 2012, The MacRuby Team. All rights reserved.
  * Copyright (C) 2010-2011, Apple Inc. All rights reserved.
  */
 
@@ -212,7 +213,8 @@ static VALUE
 nshash_each_value(id rcv, SEL sel)
 {
     RETURN_ENUMERATOR(rcv, 0, 0);
-    for (id key in rcv) {
+    // TODO: should handle the element which is inserted in iterator block.
+    for (id key in [rcv allKeys]) {
 	rb_yield(OC2RB([rcv objectForKey:key]));
 	RETURN_IF_BROKEN();
     }
@@ -223,7 +225,8 @@ static VALUE
 nshash_each_key(id rcv, SEL sel)
 {
     RETURN_ENUMERATOR(rcv, 0, 0);
-    for (id key in rcv) {
+    // TODO: should handle the element which is inserted in iterator block.
+    for (id key in [rcv allKeys]) {
 	rb_yield(OC2RB(key));
 	RETURN_IF_BROKEN();
     }
@@ -234,7 +237,8 @@ static VALUE
 nshash_each_pair(id rcv, SEL sel)
 {
     RETURN_ENUMERATOR(rcv, 0, 0);
-    for (id key in rcv) {
+    // TODO: should handle the element which is inserted in iterator block.
+    for (id key in [rcv allKeys]) {
 	id value = [rcv objectForKey:key];
 	rb_yield(rb_assoc_new(OC2RB(key), OC2RB(value)));
 	RETURN_IF_BROKEN();
@@ -260,6 +264,9 @@ nshash_values_at(id rcv, SEL sel, int argc, VALUE *argv)
     NSMutableArray *ary = [NSMutableArray new];
     for (int i = 0; i < argc; i++) {
 	id value = [rcv objectForKey:RB2OC(argv[i])];
+	if (value == NULL) {
+	    value = (id)kCFNull;
+	}
 	[ary addObject:value];
     }
     return ary;
@@ -301,7 +308,8 @@ nshash_delete_if(id rcv, SEL sel)
     CHECK_MUTABLE(rcv);
     RETURN_ENUMERATOR(rcv, 0, 0);
     NSMutableArray *ary = [NSMutableArray new];
-    for (id key in rcv) {
+    // TODO: should handle the element which is inserted in iterator block.
+    for (id key in [rcv allKeys]) {
 	id value = [rcv objectForKey:key];
 	if (RTEST(rb_yield_values(2, OC2RB(key), OC2RB(value)))) {
 	    [ary addObject:key];
@@ -315,10 +323,10 @@ nshash_delete_if(id rcv, SEL sel)
 static VALUE
 nshash_select(id rcv, SEL sel)
 {
-    CHECK_MUTABLE(rcv);
     RETURN_ENUMERATOR(rcv, 0, 0);
     NSMutableDictionary *dict = [NSMutableDictionary new];
-    for (id key in rcv) {
+    // TODO: should handle the element which is inserted in iterator block.
+    for (id key in [rcv allKeys]) {
 	id value = [rcv objectForKey:key];
 	if (RTEST(rb_yield_values(2, OC2RB(key), OC2RB(value)))) {
 	    TRY_MOP([dict setObject:value forKey:key]);
@@ -326,6 +334,46 @@ nshash_select(id rcv, SEL sel)
 	RETURN_IF_BROKEN();
     }
     return (VALUE)dict;
+}
+
+static VALUE
+keep_if(id rcv)
+{
+    CHECK_MUTABLE(rcv);
+    NSMutableDictionary *dict = [NSMutableDictionary new];
+    // TODO: should handle the element which is inserted in iterator block.
+    for (id key in [rcv allKeys]) {
+	id value = [rcv objectForKey:key];
+	if (RTEST(rb_yield_values(2, OC2RB(key), OC2RB(value)))) {
+	    TRY_MOP([dict setObject:value forKey:key]);
+	}
+	RETURN_IF_BROKEN();
+    }
+    TRY_MOP([rcv setDictionary:dict]);
+    return (VALUE)rcv;
+}
+
+static VALUE
+nshash_select_bang(id rcv, SEL sel)
+{
+    CHECK_MUTABLE(rcv);
+    RETURN_ENUMERATOR(rcv, 0, 0);
+    const long n = [rcv count];
+
+    keep_if(rcv);
+    if (n == [rcv count]) {
+	return Qnil;
+    }
+    return (VALUE)rcv;
+}
+
+static VALUE
+nshash_keep_if(id rcv, SEL sel)
+{
+    CHECK_MUTABLE(rcv);
+    RETURN_ENUMERATOR(rcv, 0, 0);
+    keep_if(rcv);
+    return (VALUE)rcv;
 }
 
 static VALUE
@@ -494,7 +542,9 @@ Init_NSDictionary(void)
     rb_objc_define_method(rb_cHash, "shift", nshash_shift, 0);
     rb_objc_define_method(rb_cHash, "delete", nshash_delete, 1);
     rb_objc_define_method(rb_cHash, "delete_if", nshash_delete_if, 0);
+    rb_objc_define_method(rb_cHash, "keep_if", nshash_keep_if, 0);
     rb_objc_define_method(rb_cHash, "select", nshash_select, 0);
+    rb_objc_define_method(rb_cHash, "select!", nshash_select_bang, 0);
     rb_objc_define_method(rb_cHash, "reject", nshash_reject, 0);
     rb_objc_define_method(rb_cHash, "reject!", nshash_reject_bang, 0);
     rb_objc_define_method(rb_cHash, "clear", nshash_clear, 0);

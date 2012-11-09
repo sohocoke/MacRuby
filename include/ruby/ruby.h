@@ -1,6 +1,7 @@
 /*
  * This file is covered by the Ruby license. See COPYING for more details.
  *
+ * Copyright (C) 2012, The MacRuby Team. All rights reserved.
  * Copyright (C) 2007-2010, Apple Inc. All rights reserved
  * Copyright (C) 1993-2008 Yukihiro Matsumoto
  * Copyright (C) 2000  Network Applied Communication Laboratory, Inc.
@@ -66,6 +67,7 @@ typedef unsigned long VALUE;
 # define PRIuVALUE "lu"
 # define PRIxVALUE "lx"
 # define PRIXVALUE "lX"
+# define PRI_TIMET_PREFIX "l"
 #elif SIZEOF_LONG_LONG == SIZEOF_VOIDP
 typedef unsigned LONG_LONG VALUE;
 typedef unsigned LONG_LONG ID;
@@ -78,6 +80,7 @@ typedef unsigned LONG_LONG ID;
 # define PRIuVALUE "llu"
 # define PRIxVALUE "llx"
 # define PRIXVALUE "llX"
+# define PRI_TIMET_PREFIX "ll"
 #else
 # error ---->> ruby requires sizeof(void*) == sizeof(long) to be compiled. <<----
 #endif
@@ -383,6 +386,7 @@ void rb_set_errinfo(VALUE);
 SIGNED_VALUE rb_num2long(VALUE);
 VALUE rb_num2ulong(VALUE);
 #define NUM2LONG(x) (FIXNUM_P(x)?FIX2LONG(x):rb_num2long((VALUE)x))
+#define NUM2TIMET(v) NUM2LONG(v)
 #define NUM2ULONG(x) rb_num2ulong((VALUE)x)
 #if SIZEOF_INT < SIZEOF_LONG
 long rb_num2int(VALUE);
@@ -464,7 +468,7 @@ int rb_class_ismeta(VALUE klass);
 
 #define ELTS_SHARED FL_USER2
 
-const char *rb_str_cstr(VALUE);
+char *rb_str_cstr(VALUE);
 long rb_str_clen(VALUE);
 #define RSTRING_PTR(str) (rb_str_cstr((VALUE)str))
 #define RSTRING_LEN(str) (rb_str_clen((VALUE)str))
@@ -473,7 +477,10 @@ long rb_str_clen(VALUE);
 
 long rb_ary_len(VALUE);
 VALUE rb_ary_elt(VALUE, long);
+void rb_ary_elt_set(VALUE, long, VALUE);
+
 #define RARRAY_LEN(a) (rb_ary_len((VALUE)a))
+#define RARRAY_LENINT(a) (rb_long2int(RARRAY_LEN(a)))
 #define RARRAY_AT(a,i) (rb_ary_elt((VALUE)a, (long)i))
 /* IMPORTANT: try to avoid using RARRAY_PTR if necessary, because it's
  * a _much_ slower operation than RARRAY_AT. RARRAY_PTR is only provided for

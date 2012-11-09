@@ -1,8 +1,9 @@
-/* 
+/*
  * MacRuby implementation of ENV.
  *
  * This file is covered by the Ruby license. See COPYING for more details.
- * 
+ *
+ * Copyright (C) 2012, The MacRuby Team. All rights reserved.
  * Copyright (C) 2007-2011, Apple Inc. All rights reserved.
  * Copyright (C) 1993-2007 Yukihiro Matsumoto
  * Copyright (C) 2000 Network Applied Communication Laboratory, Inc.
@@ -151,10 +152,14 @@ void
 ruby_setenv(const char *name, const char *value)
 {
     if (value != NULL) {
-	setenv(name, value, 1);
+	if (setenv(name, value, 1)) {
+	    rb_sys_fail("setenv");
+	}
     }
     else {
-	unsetenv(name);
+	if (unsetenv(name)) {
+	    rb_sys_fail("unsetenv");
+	}
     }
 }
 
@@ -344,6 +349,39 @@ env_select(VALUE ehash, SEL sel)
 	env++;
     }
     return result;
+}
+
+static VALUE
+env_select_bang(VALUE ehash, SEL sel)
+{
+    volatile VALUE keys;
+    long i;
+    int del = 0;
+
+    RETURN_ENUMERATOR(ehash, 0, 0);
+    keys = env_keys(Qnil, 0);	/* rb_secure(4); */
+    for (i=0; i<RARRAY_LEN(keys); i++) {
+	VALUE val = rb_f_getenv(Qnil, 0, RARRAY_AT(keys, i));
+	if (!NIL_P(val)) {
+	    if (!RTEST(rb_yield_values(2, RARRAY_AT(keys, i), val))) {
+		rb_obj_untaint(RARRAY_AT(keys, i));
+		env_delete(Qnil, RARRAY_PTR(keys)[i]);
+		del++;
+	    }
+	}
+    }
+    if (del == 0) {
+	return Qnil;
+    }
+    return envtbl;
+}
+
+static VALUE
+env_keep_if(VALUE ehash, SEL sel)
+{
+    RETURN_ENUMERATOR(ehash, 0, 0);
+    env_select_bang(ehash, 0);
+    return envtbl;
 }
 
 static VALUE
@@ -705,10 +743,12 @@ Init_ENV(void)
     rb_objc_define_method(klass, "each_value", env_each_value, 0);
     rb_objc_define_method(klass, "delete", env_delete_m, 1);
     rb_objc_define_method(klass, "delete_if", env_delete_if, 0);
+    rb_objc_define_method(klass, "keep_if", env_keep_if, 0);
     rb_objc_define_method(klass, "clear", rb_env_clear_imp, 0);
     rb_objc_define_method(klass, "reject", env_reject, 0);
     rb_objc_define_method(klass, "reject!", env_reject_bang, 0);
     rb_objc_define_method(klass, "select", env_select, 0);
+    rb_objc_define_method(klass, "select!", env_select_bang, 0);
     rb_objc_define_method(klass, "shift", env_shift, 0);
     rb_objc_define_method(klass, "invert", env_invert, 0);
     rb_objc_define_method(klass, "replace", env_replace, 1);

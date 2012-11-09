@@ -2,7 +2,8 @@
  * MacRuby VM.
  *
  * This file is covered by the Ruby license. See COPYING for more details.
- * 
+ *
+ * Copyright (C) 2012, The MacRuby Team. All rights reserved.
  * Copyright (C) 2008-2011, Apple Inc. All rights reserved.
  */
 
@@ -666,8 +667,9 @@ rb_vm_call(VALUE self, SEL sel, int argc, const VALUE *argv)
 static inline VALUE
 rb_vm_call_super(VALUE self, SEL sel, int argc, const VALUE *argv)
 {
+    rb_vm_block_t *b = rb_vm_current_block();
     return rb_vm_call0(rb_vm_current_vm(), 0, self, (Class)CLASS_OF(self), sel,
-	    NULL, DISPATCH_SUPER, argc, argv);
+	    b, DISPATCH_SUPER, argc, argv);
 }
 
 static inline VALUE
@@ -688,6 +690,15 @@ rb_vm_method_call(rb_vm_method_t *m, rb_vm_block_t *block, int argc,
     return rb_vm_dispatch(rb_vm_current_vm(), (struct mcache *)m->cache, 0,
 	    m->recv, (Class)m->oclass, m->sel, block, DISPATCH_FCALL,
 	    argc, argv);
+}
+
+static inline VALUE
+rb_vm_check_call(VALUE self, SEL sel, int argc, const VALUE *argv)
+{
+    if (!rb_vm_respond_to(self, sel, true)) {
+	return Qundef;
+    }
+    return rb_vm_call(self, sel, argc, argv);
 }
 
 VALUE rb_vm_yield_args(void *vm, int argc, const VALUE *argv);
@@ -1225,8 +1236,9 @@ class RoxorVM {
 
 	void setup_from_current_thread(void);
 
+	void remove_recursive_object(VALUE obj);
 	VALUE exec_recursive(VALUE (*func) (VALUE, VALUE, int), VALUE obj,
-		VALUE arg);
+		VALUE arg, int outer);
 
         rb_vm_outer_t *push_outer(Class klass);
         void pop_outer(bool need_release = false);

@@ -1,6 +1,7 @@
 /*
  * This file is covered by the Ruby license. See COPYING for more details.
  * 
+ * Copyright (C) 2012, The MacRuby Team. All rights reserved.
  * Copyright (C) 2007-2010, Apple Inc. All rights reserved.
  * Copyright (C) 1993-2007 Yukihiro Matsumoto
  */
@@ -1118,7 +1119,7 @@ stmt		: keyword_alias fitem {lex_state = EXPR_FNAME;} fitem
 
 			value_expr($6);
 			if (!$3) $3 = NEW_ZARRAY();
-			args = arg_concat($6, $3);
+			args = arg_concat($3, $6);
 			if ($5 == tOROP) {
 			    $5 = 0;
 			}
@@ -1959,7 +1960,7 @@ arg		: lhs '=' arg
 
 			value_expr($6);
 			if (!$3) $3 = NEW_ZARRAY();
-			args = arg_concat($6, $3);
+			args = arg_concat($3, $6);
 			if ($5 == tOROP) {
 			    $5 = 0;
 			}
@@ -10207,7 +10208,7 @@ ripper_initialize(VALUE self, SEL sel, int argc, VALUE *argv)
     parser_initialize(parser);
 
     GC_WB(&parser->parser_ruby_sourcefile_string, fname);
-    parser->parser_ruby_sourcefile = (char *)RSTRING_PTR(fname);
+    parser->parser_ruby_sourcefile = RSTRING_PTR(fname);
     parser->parser_ruby_sourceline = NIL_P(lineno) ? 0 : NUM2INT(lineno) - 1;
 
     return Qnil;

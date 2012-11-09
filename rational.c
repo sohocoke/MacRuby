@@ -1,6 +1,7 @@
 /*
  * This file is covered by the Ruby license. See COPYING for more details.
- * 
+ *
+ * Copyright (C) 2012, The MacRuby Team. All rights reserved.
  * Copyright (C) 2009-2011, Apple Inc. All rights reserved.
  * Copyright (C) 2008-2009, Tadayoshi Funaba
  */
@@ -1582,10 +1583,11 @@ static VALUE
 nurat_marshal_load(VALUE self, SEL sel, VALUE a)
 {
     get_dat1(self);
-    VALUE ary = rb_convert_type(a, T_ARRAY, "Array", "to_ary");
-    dat->num = RARRAY_AT(ary, 0);
-    dat->den = RARRAY_AT(ary ,1);
-    rb_copy_generic_ivar(self, ary);
+    Check_Type(a, T_ARRAY);
+    GC_WB(&dat->num, RARRAY_AT(a, 0));
+    GC_WB(&dat->den, RARRAY_AT(a ,1));
+    rb_copy_generic_ivar(self, a);
+
     if (f_zero_p(dat->den)) {
 	rb_raise_zerodiv();
     }
@@ -2009,9 +2011,6 @@ make_patterns(void)
 
 #define id_split rb_intern("split")
 #define f_split(x,y) rb_funcall(x, id_split, 1, y)
-
-#define id_strip rb_intern("strip")
-#define f_strip(x) rb_funcall(x, id_strip, 0)
 
 #include <ctype.h>
 

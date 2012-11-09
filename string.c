@@ -3,6 +3,7 @@
  *
  * This file is covered by the Ruby license. See COPYING for more details.
  *
+ * Copyright (C) 2012, The MacRuby Team. All rights reserved.
  * Copyright (C) 2007-2011, Apple Inc. All rights reserved.
  * Copyright (C) 1993-2007 Yukihiro Matsumoto
  * Copyright (C) 2000 Network Applied Communication Laboratory, Inc.
@@ -288,6 +289,7 @@ str_replace_with_string(rb_str_t *self, rb_str_t *source)
 	str_update_flags(source);
     }
     self->flags = source->flags;
+    self->cached_length = source->cached_length;
 }
 
 static void
@@ -418,6 +420,11 @@ str_length_with_cache(rb_str_t *self, character_boundaries_cache_t *cache)
 	return cache->cached_length;
     }
 
+    // TODO: might not need character_boundaries_cache_t *cache in above
+    if (self->cached_length != 0) {
+	return self->cached_length;
+    }
+
     // slow paths
     long length = 0;
     if (IS_UTF8_ENC(self->encoding)) {
@@ -444,6 +451,8 @@ str_length_with_cache(rb_str_t *self, character_boundaries_cache_t *cache)
     if (cache != NULL) {
 	cache->cached_length = length;
     }
+
+    self->cached_length = length;
     return length;
 }
 
@@ -854,6 +863,7 @@ str_splice(rb_str_t *self, long pos, long len, rb_str_t *str)
     const long bytes_to_splice = end.end_offset_in_bytes
 	- beg.start_offset_in_bytes;
 
+    str_reset_cache(self);
     long bytes_to_add = 0;
     if (str != NULL) {
 	if (!str->flags) {
@@ -897,6 +907,7 @@ str_delete(rb_str_t *self, long pos, long len)
 {
     if (str_is_ruby_ascii_only(self) &&
 	self->length_in_bytes <= pos + len) {
+	str_reset_cache(self);
 	self->length_in_bytes = pos;
 	return;
     }
@@ -916,6 +927,7 @@ str_concat_bytes(rb_str_t *self, const char *bytes, long len)
 
     const long new_length_in_bytes = self->length_in_bytes + len;
 
+    str_reset_cache(self);
     str_resize_bytes(self, new_length_in_bytes);
     memcpy(self->bytes + self->length_in_bytes, bytes, len);
     self->length_in_bytes = new_length_in_bytes;
@@ -1459,6 +1471,7 @@ rb_str_xcopy_uchars(VALUE str, long *len_p)
     UChar *chars = NULL;
     long len = 0;
 
+    str = (VALUE)str_need_string(str);
     if (IS_RSTR(str)) {
 	rb_str_t *rstr = RSTR(str);
 	len = str_length(rstr);
@@ -2624,7 +2637,7 @@ rstr_format(VALUE str, SEL sel, VALUE arg)
     VALUE tmp = rb_check_array_type(arg);
 
     if (!NIL_P(tmp)) {
-	return rb_str_format(RARRAY_LEN(tmp), RARRAY_PTR(tmp), str);
+	return rb_str_format(RARRAY_LENINT(tmp), RARRAY_PTR(tmp), str);
     }
     return rb_str_format(1, &arg, str);
 }
@@ -2692,7 +2705,7 @@ rstr_concat(VALUE self, SEL sel, VALUE other)
     return self;
 
 out_of_range:
-    rb_raise(rb_eArgError, "codepoint %ld out of range", codepoint);
+    rb_raise(rb_eRangeError, "codepoint %ld out of range", codepoint);
 }
 
 /*
@@ -3154,6 +3167,12 @@ rstr_match(VALUE self, SEL sel, VALUE other)
 	default:
 	    return rb_vm_call(other, selEqTilde, 1, &self);
     }
+}
+
+VALUE
+rb_str_match(VALUE self, VALUE other)
+{
+    return rstr_match(self, 0, other);
 }
 
 /*
@@ -4644,7 +4663,8 @@ str_strip(VALUE str, int direction)
 	// Strip left side.
 	long pos = 0;
 	while (pos < len) {
-	    if (!isspace((char)rb_str_get_uchar(str, pos))) {
+	    UChar c = rb_str_get_uchar(str, pos);
+	    if (!isspace(c) || c > 127) {
 		break;
 	    }
 	    pos++;
@@ -4662,7 +4682,7 @@ str_strip(VALUE str, int direction)
 	long pos = len - 1;
 	while (pos >= 0) {
 	    UChar c = rb_str_get_uchar(str, pos);
-	    if (!isspace((char)c) && c != '\0') {
+	    if ((!isspace(c) && c != '\0') || c > 127) {
 		break;
 	    }
 	    pos--;
@@ -5109,6 +5129,12 @@ rstr_succ(VALUE str, SEL sel)
     return newstr;
 }
 
+VALUE
+rb_str_succ(VALUE str)
+{
+    return rstr_succ(str, 0);
+}
+
 /*
  *  call-seq:
  *     str.succ!   => str
@@ -5302,6 +5328,35 @@ rstr_transform(VALUE str, SEL sel, VALUE transform_pat)
     return rb_unicode_str_new(new_chars, (long)capacity);
 }
 
+static void
+rstr_reverse_bang_uchar32(VALUE str)
+{
+    char *new_bytes = xmalloc(RSTR(str)->length_in_bytes);
+    __block long pos = RSTR(str)->length_in_bytes;
+    str_each_uchar32(RSTR(str), ^(UChar32 c, long start_index, long char_len, bool *stop) {
+	pos -= char_len;
+	memcpy(&new_bytes[pos], &RSTR(str)->bytes[start_index], char_len);
+    });
+    assert(pos == 0);
+
+    RSTR(str)->capacity_in_bytes = RSTR(str)->length_in_bytes;
+    GC_WB(&RSTR(str)->bytes, new_bytes);
+}
+
+static void
+rstr_reverse_bang_ascii(VALUE str)
+{
+    char *s, *e, c;
+    s = RSTR(str)->bytes;
+    e = RSTR(str)->bytes + RSTR(str)->length_in_bytes - 1;
+
+    while (s < e) {
+	c = *s;
+	*s++ = *e;
+	*e-- = c;
+    }
+}
+
 /*
  *  call-seq:
  *     str.reverse!   => str
@@ -5318,20 +5373,12 @@ rstr_reverse_bang(VALUE str, SEL sel)
 	return str;
     }
 
-    char *new_bytes = xmalloc(RSTR(str)->length_in_bytes);
-    __block long pos = RSTR(str)->length_in_bytes;
-    str_each_uchar32(RSTR(str), ^(UChar32 c, long start_index, long char_len, bool *stop) {
-	pos -= char_len;
-	memcpy(&new_bytes[pos], &RSTR(str)->bytes[start_index], char_len);
-    });
-    assert(pos == 0);
-
-    RSTR(str)->capacity_in_bytes = RSTR(str)->length_in_bytes;
-    GC_WB(&RSTR(str)->bytes, new_bytes);
-
-    // we modify it directly so the information stored
-    // in the facultative flags might be outdated
-    str_reset_flags(RSTR(str));
+    if (str_is_ruby_ascii_only(RSTR(str))) {
+	rstr_reverse_bang_ascii(str);
+    }
+    else {
+	rstr_reverse_bang_uchar32(str);
+    }
 
     return str;
 }
@@ -6529,7 +6576,7 @@ rb_str_new_cstr(const char *ptr)
 }
 
 
-const char *
+char *
 rb_str_cstr(VALUE str)
 {
     if (IS_RSTR(str)) {
@@ -6539,7 +6586,7 @@ rb_str_cstr(VALUE str)
 	str_ensure_null_terminator(RSTR(str));
 	return RSTR(str)->bytes;
     }
-    return nsstr_cstr(str);
+    return (char*)nsstr_cstr(str);
 }
 
 long
@@ -6555,13 +6602,20 @@ char *
 rb_string_value_cstr(volatile VALUE *ptr)
 {
     VALUE str = rb_string_value(ptr);
-    return (char *)rb_str_cstr(str);
+    const char *s = rb_str_cstr(str);
+    long len = RSTRING_LEN(str);
+
+    if (len != strlen(s)) {
+	rb_raise(rb_eArgError, "string contains null byte");
+    }
+    return (char *)s;
 }
 
 char *
 rb_string_value_ptr(volatile VALUE *ptr)
 {
-    return rb_string_value_cstr(ptr);
+    VALUE str = rb_string_value(ptr);
+    return rb_str_cstr(str);
 }
 
 VALUE
@@ -6711,6 +6765,9 @@ rb_enc_str_buf_cat(VALUE str, const char *cstr, long len, rb_encoding_t *enc)
 VALUE
 rb_str_buf_cat(VALUE str, const char *cstr, long len)
 {
+    if (!IS_RSTR(str)) {
+	str = (VALUE)str_new_from_cfstring((CFStringRef)str);
+    }
     return rb_enc_str_buf_cat(str, cstr, len, RSTR(str)->encoding);
 }
 

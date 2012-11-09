@@ -1,8 +1,9 @@
 /*
  * MacRuby extensions to NSString.
- * 
+ *
  * This file is covered by the Ruby license. See COPYING for more details.
  *
+ * Copyright (C) 2012, The MacRuby Team. All rights reserved.
  * Copyright (C) 2010-2011, Apple Inc. All rights reserved.
  */
 
@@ -54,6 +55,10 @@ to_str(VALUE str)
 static id
 nsstr_dup(id rcv, SEL sel)
 {
+    if (TYPE(rcv) == T_SYMBOL) {
+        rb_raise(rb_eTypeError, "can't dup %s", rb_obj_classname((VALUE)rcv));
+    }
+
     id dup = (id)str_new_from_cfstring((CFStringRef)rcv);
     if (OBJ_TAINTED(rcv)) {
 	OBJ_TAINT(dup);

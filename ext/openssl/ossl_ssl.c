@@ -111,9 +111,12 @@ struct {
     OSSL_SSL_METHOD_ENTRY(TLSv1),
     OSSL_SSL_METHOD_ENTRY(TLSv1_server),
     OSSL_SSL_METHOD_ENTRY(TLSv1_client),
+#if defined(HAVE_SSLV2_METHOD) && defined(HAVE_SSLV2_SERVER_METHOD) && \
+        defined(HAVE_SSLV2_CLIENT_METHOD)	
     OSSL_SSL_METHOD_ENTRY(SSLv2),
     OSSL_SSL_METHOD_ENTRY(SSLv2_server),
     OSSL_SSL_METHOD_ENTRY(SSLv2_client),
+#endif
     OSSL_SSL_METHOD_ENTRY(SSLv3),
     OSSL_SSL_METHOD_ENTRY(SSLv3_server),
     OSSL_SSL_METHOD_ENTRY(SSLv3_client),
@@ -1416,10 +1419,10 @@ ossl_ssl_get_peer_cert_chain(VALUE self)
     }
     chain = SSL_get_peer_cert_chain(ssl);
     if(!chain) return Qnil;
-    num = sk_num(chain);
+    num = sk_X509_num(chain);
     ary = rb_ary_new2(num);
     for (i = 0; i < num; i++){
-	cert = (X509*)sk_value(chain, i);
+	cert = sk_X509_value(chain, i);
 	rb_ary_push(ary, ossl_x509_new(cert));
     }
 

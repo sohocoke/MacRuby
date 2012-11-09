@@ -2,7 +2,8 @@
  * MacRuby Compiler.
  *
  * This file is covered by the Ruby license. See COPYING for more details.
- * 
+ *
+ * Copyright (C) 2012, The MacRuby Team. All rights reserved.
  * Copyright (C) 2008-2011, Apple Inc. All rights reserved.
  */
 
@@ -158,6 +159,7 @@ class RoxorCompiler {
 	Function *fastMinusFunc;
 	Function *fastMultFunc;
 	Function *fastDivFunc;
+	Function *fastModFunc;
 	Function *fastLtFunc;
 	Function *fastLeFunc;
 	Function *fastGtFunc;

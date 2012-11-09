@@ -1,1 +1,1 @@
-fails:Time#- accepts arguments that can be coerced into Rational
+fails:Time#- understands negative subtractions

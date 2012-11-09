@@ -1,8 +1,9 @@
-/* 
+/*
  * MacRuby implementation of Ruby 1.9's array.c.
  *
  * This file is covered by the Ruby license. See COPYING for more details.
- * 
+ *
+ * Copyright (C) 2012, The MacRuby Team. All rights reserved.
  * Copyright (C) 2007-2011, Apple Inc. All rights reserved.
  * Copyright (C) 1993-2007 Yukihiro Matsumoto
  * Copyright (C) 2000 Network Applied Communication Laboratory, Inc.
@@ -1346,9 +1347,9 @@ static void
 ary_reverse(VALUE ary, long pos1, long pos2)
 {
     while (pos1 < pos2) {
-	VALUE elem = rary_elt(ary, pos1);
-	rary_elt_set(ary, pos1, rary_elt(ary, pos2));
-	rary_elt_set(ary, pos2, elem);
+	VALUE elem = rb_ary_elt(ary, pos1);
+	rb_ary_elt_set(ary, pos1, rb_ary_elt(ary, pos2));
+	rb_ary_elt_set(ary, pos2, elem);
 	pos1++;
 	pos2--;
     }
@@ -1358,7 +1359,7 @@ VALUE
 ary_rotate(VALUE ary, long cnt)
 {
     if (cnt != 0) {
-	long len = RARY(ary)->len;
+	long len = rb_ary_len(ary);
 	if (len > 0 && (cnt = rotate_count(cnt, len)) > 0) {
 	    --len;
 	    if (cnt < len) {
@@ -1392,16 +1393,17 @@ ary_rotate(VALUE ary, long cnt)
  *     a.rotate!(-3)    #=> ["a", "b", "c", "d"]
  */
 
-static VALUE
+VALUE
 rary_rotate_bang(VALUE ary, SEL sel, int argc, VALUE *argv)
 {
-    VALUE n;
     long cnt = 1;
 
-    rb_scan_args(argc, argv, "01", &n);
-    if (!NIL_P(n)) {
-	cnt = NUM2LONG(n);
+    switch (argc) {
+      case 1: cnt = NUM2LONG(argv[0]);
+      case 0: break;
+      default: rb_scan_args(argc, argv, "01", NULL);
     }
+
     rb_ary_modify(ary);
     ary_rotate(ary, cnt);
     return ary;
@@ -1422,20 +1424,20 @@ rary_rotate_bang(VALUE ary, SEL sel, int argc, VALUE *argv)
  *     a.rotate(-3)     #=> ["b", "c", "d", "a"]
  */
 
-static VALUE
+VALUE
 rary_rotate(VALUE ary, SEL sel, int argc, VALUE *argv)
 {
     VALUE rotated;
-    VALUE n;
     long cnt = 1;
 
-    rb_scan_args(argc, argv, "01", &n);
-    if (!NIL_P(n)) {
-	cnt = NUM2LONG(n);
+    switch (argc) {
+      case 1: cnt = NUM2LONG(argv[0]);
+      case 0: break;
+      default: rb_scan_args(argc, argv, "01", NULL);
     }
 
-    rotated = rary_dup(ary, 0);
-    if (RARY(ary)->len > 0) {
+    rotated = rb_ary_dup(ary);
+    if (rb_ary_len(ary) > 0) {
 	ary_rotate(rotated, cnt);
     }
     return rotated;
@@ -2515,7 +2517,7 @@ rary_equal(VALUE ary1, SEL sel, VALUE ary2)
 	return Qtrue;
     }
     if (TYPE(ary2) != T_ARRAY) {
-	if (!rb_vm_respond_to(ary2, selToAry, true)) {
+	if (!rb_vm_respond_to(ary2, selToAry, false)) {
 	    return Qfalse;
 	}
 	return rb_equal(ary2, ary1);
@@ -2584,6 +2586,20 @@ rary_eql_fast(rb_ary_t *ary1, rb_ary_t *ary2)
 	return false;
     }
     return rb_exec_recursive(recursive_eql_fast, (VALUE)ary1, (VALUE)ary2);
+}
+
+/*
+ *  call-seq:
+ *     ary.hash   -> fixnum
+ *
+ *  Compute a hash-code for this array. Two arrays with the same content
+ *  will have the same hash code (and will compare using <code>eql?</code>).
+ */
+
+VALUE
+rary_hash(VALUE ary, SEL sel)
+{
+    return LONG2FIX(rb_ary_hash(ary));
 }
 
 /*
@@ -2683,8 +2699,8 @@ rary_cmp(VALUE ary1, SEL sel, VALUE ary2)
  *     [ 1, 1, 2, 2, 3, 3, 4, 5 ] - [ 1, 2, 4 ]  #=>  [ 3, 3, 5 ]
  */
 
-static VALUE
-ary_make_hash(VALUE ary1, VALUE ary2)
+VALUE
+rb_ary_make_hash(VALUE ary1, VALUE ary2)
 {
     VALUE hash = rb_hash_new();
     for (long i = 0; i < RARRAY_LEN(ary1); i++) {
@@ -2693,6 +2709,19 @@ ary_make_hash(VALUE ary1, VALUE ary2)
     if (ary2) {
 	for (long i = 0; i < RARRAY_LEN(ary2); i++) {
 	    rb_hash_aset(hash, RARRAY_AT(ary2, i), Qtrue);
+	}
+    }
+    return hash;
+}
+
+VALUE
+rb_ary_make_hash_by(VALUE ary)
+{
+    VALUE hash = rb_hash_new();
+    for (long i = 0; i < RARRAY_LEN(ary); ++i) {
+	VALUE v = rb_ary_elt(ary, i), k = rb_yield(v);
+	if (rb_hash_lookup(hash, k) == Qnil) {
+	    rb_hash_aset(hash, k, v);
 	}
     }
     return hash;
@@ -2713,7 +2742,7 @@ rary_diff(VALUE ary1, SEL sel, VALUE ary2)
 	return ary3;
     }
 
-    VALUE hash = ary_make_hash(ary2, 0);
+    VALUE hash = rb_ary_make_hash(ary2, 0);
     for (long i = 0; i < ary1_len; i++) {
 	VALUE v = RARRAY_AT(ary1, i);
 	if (rb_hash_has_key(hash, v) == Qfalse) {
@@ -2751,7 +2780,7 @@ rary_and(VALUE ary1, SEL sel, VALUE ary2)
     ary2 = to_ary(ary2);
     VALUE ary3 = rb_ary_new2(RARRAY_LEN(ary1) < RARRAY_LEN(ary2) ?
 	    RARRAY_LEN(ary1) : RARRAY_LEN(ary2));
-    VALUE hash = ary_make_hash(ary2, 0);
+    VALUE hash = rb_ary_make_hash(ary2, 0);
     if (RHASH_EMPTY_P(hash)) {
         return ary3;
     }
@@ -2776,10 +2805,17 @@ rary_or(VALUE ary1, SEL sel, VALUE ary2)
 {
     ary2 = to_ary(ary2);
     VALUE ary3 = rb_ary_new2(RARRAY_LEN(ary1) + RARRAY_LEN(ary2));
-    VALUE hash = ary_make_hash(ary1, ary2);
+    VALUE hash = rb_ary_make_hash(ary1, ary2);
     filter_diff(ary1, ary3, hash);
     filter_diff(ary2, ary3, hash);
     return ary3;
+}
+
+static int
+push_value(st_data_t key, st_data_t val, st_data_t ary)
+{
+    rb_ary_push((VALUE)ary, (VALUE)val);
+    return ST_CONTINUE;
 }
 
 /*
@@ -2807,12 +2843,17 @@ rary_uniq_bang(VALUE ary, SEL sel)
         return Qnil;
     }
     if (rb_block_given_p()) {
-	// TODO
-	return Qnil;
+	hash = rb_ary_make_hash_by(ary);
+	if (RARRAY_LEN(ary) == RHASH_SIZE(hash)) {
+	    return Qnil;
+	}
+	RARY(ary)->len = 0;
+	st_foreach(RHASH_TBL(hash), push_value, ary);
+	rary_resize(ary, RHASH_SIZE(hash));
     }
     else {
-	hash = ary_make_hash(rb_ary_new(), ary);
-	if (RARRAY_LEN(ary) == (long)RHASH_SIZE(hash)) {
+	hash = rb_ary_make_hash(ary, 0);
+	if (RARRAY_LEN(ary) == RHASH_SIZE(hash)) {
 	    return Qnil;
 	}
 	for (i=j=0; i<RARRAY_LEN(ary); i++) {
@@ -3063,7 +3104,7 @@ rary_flatten(VALUE ary, SEL sel, int argc, VALUE *argv)
 	level = NUM2INT(lv);
     }
     if (level == 0) {
-	return rary_dup(ary, 0);
+	return rb_ary_dup(ary);
     }
 
     result = flatten(ary, level, &mod);
@@ -3492,30 +3533,34 @@ rary_product(VALUE ary, SEL sel, int argc, VALUE *argv)
     /* initialize the arrays of arrays */
     arrays[0] = ary;
     for (i = 1; i < n; i++) arrays[i] = to_ary(argv[i-1]);
-    
+
     /* initialize the counters for the arrays */
     for (i = 0; i < n; i++) counters[i] = 0;
 
-    /* Compute the length of the result array; return [] if any is empty */
-    for (i = 0; i < n; i++) {
-	long k = RARRAY_LEN(arrays[i]), l = resultlen;
-	if (k == 0) {
-	    if (rb_block_given_p()) {
+	/* Otherwise, allocate and fill in an array of results */
+    if (rb_block_given_p()) {
+	/* Make defensive copies of arrays; exit if any is empty */
+	for (i = 0; i < n; i++) {
+	    if (RARRAY_LEN(arrays[i]) == 0) {
 		return ary;
 	    }
-	    return rb_ary_new2(0);
-	}
-	resultlen *= k;
-	if (resultlen < k || resultlen < l || resultlen / k != l) {
-	    rb_raise(rb_eRangeError, "too big to product");
 	}
     }
-
-    if (!rb_block_given_p()) {
-	/* Otherwise, allocate and fill in an array of results */
+    else {
+	/* Compute the length of the result array; return [] if any is empty */
+	for (i = 0; i < n; i++) {
+	    long k = RARRAY_LEN(arrays[i]), l = resultlen;
+	    if (k == 0) {
+		return rb_ary_new2(0);
+	    }
+	    resultlen *= k;
+	    if (resultlen < k || resultlen < l || resultlen / k != l) {
+		rb_raise(rb_eRangeError, "too big to product");
+	    }
+	}
 	result = rb_ary_new2(resultlen);
     }
-    for (i = 0; i < resultlen; i++) {
+    for (;;) {
 	int m;
 	/* fill in one subarray */
 	VALUE subarray = rb_ary_new2(n);
@@ -3525,6 +3570,7 @@ rary_product(VALUE ary, SEL sel, int argc, VALUE *argv)
 
 	if (NIL_P(result)) {
 	    rb_yield(subarray);
+	    RETURN_IF_BROKEN();
 	}
 	else {
 	    /* put it on the result array */
@@ -3537,13 +3583,16 @@ rary_product(VALUE ary, SEL sel, int argc, VALUE *argv)
 	 */
 	m = n-1;
 	counters[m]++;
-	while (m > 0 && counters[m] == RARRAY_LEN(arrays[m])) {
+	while (counters[m] == RARRAY_LEN(arrays[m])) {
 	    counters[m] = 0;
-	    m--;
+	    if (--m < 0) {
+		goto done;
+	    }
 	    counters[m]++;
 	}
     }
 
+  done:
     return NIL_P(result) ? ary : result;
 }
 
@@ -3788,8 +3837,6 @@ Init_Array(void)
     rb_objc_define_method(rb_cRubyArray, "rindex", rary_rindex, -1);
     rb_objc_define_method(rb_cRubyArray, "reverse", rary_reverse, 0);
     rb_objc_define_method(rb_cRubyArray, "reverse!", rary_reverse_bang, 0);
-    rb_objc_define_method(rb_cRubyArray, "rotate", rary_rotate, -1);
-    rb_objc_define_method(rb_cRubyArray, "rotate!", rary_rotate_bang, -1);
     rb_objc_define_method(rb_cRubyArray, "sort", rary_sort, 0);
     rb_objc_define_method(rb_cRubyArray, "sort!", rary_sort_bang, 0);
     rb_objc_define_method(rb_cRubyArray, "sort_by!", rary_sort_by_bang, 0);

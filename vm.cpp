@@ -2,7 +2,8 @@
  * MacRuby VM.
  *
  * This file is covered by the Ruby license. See COPYING for more details.
- * 
+ *
+ * Copyright (C) 2012, The MacRuby Team. All rights reserved.
  * Copyright (C) 2008-2011, Apple Inc. All rights reserved.
  */
 
@@ -1606,11 +1607,11 @@ rb_vm_alias2(VALUE outer, VALUE name, VALUE def, unsigned char dynamic_class)
 {
     if (dynamic_class) {
 	Class k = GET_VM()->get_current_class();
-	if (k != NULL) {
-	    outer = (VALUE)k;
-	}
-	else if (RCLASS_SUPER(outer) == 0) {
+	if (NIL_P(outer)) {
 	    rb_raise(rb_eTypeError, "no class to make alias");
+	}
+	else if (k != NULL) {
+	    outer = (VALUE)k;
 	}
     }
 
@@ -2122,6 +2123,9 @@ prepare_method(Class klass, bool dynamic_class, SEL sel, void *data,
 	const rb_vm_arity_t &arity, int flags, bool precompiled,
 	void *objc_imp_types)
 {
+    if (OBJ_FROZEN(klass)) {
+	rb_error_frozen("class/module");
+    }
     if (dynamic_class) {
 	Class k;
 	rb_vm_outer_t *o = GET_VM()->get_outer_stack();
@@ -2131,20 +2135,20 @@ prepare_method(Class klass, bool dynamic_class, SEL sel, void *data,
 	else {
 	    k = o->klass;
 	}
-	if (k != NULL) {
+	if (NIL_P(k)) {
+	    rb_raise(rb_eTypeError, "no class/module to add method");
+	}
+	else if (klass != NULL) {
 	    const bool meta = class_isMetaClass(klass);
 	    klass = k;
 	    if (meta && !class_isMetaClass(klass)) {
 		klass = *(Class *)klass;
 	    }
 	}
-	else if (RCLASS_SUPER(klass) == 0) {
-	    rb_raise(rb_eTypeError, "no class/module to add method");
-	}
     }
     else {
 	rb_vm_outer_t *o = GET_VM()->get_outer_stack();
-	if (o != NULL && o->klass == NULL) {
+	if ((o != NULL && o->klass == NULL) || NIL_P(o)) {
 	    rb_raise(rb_eTypeError, "no class/module to add method");
 	}
     }
@@ -2667,6 +2671,10 @@ __rb_vm_define_method(Class klass, SEL sel, IMP objc_imp, IMP ruby_imp,
 	return NULL;
     }
 
+    if (OBJ_FROZEN(klass)) {
+	rb_error_frozen("class/module");
+    }
+
     const char *sel_name = sel_getName(sel);
     const bool genuine_selector = sel_name[strlen(sel_name) - 1] == ':';
     int types_count = genuine_selector ? arity.real + 3 : 3;
@@ -2811,6 +2819,12 @@ extern "C"
 void
 rb_vm_undef_method(Class klass, ID name, bool check)
 {
+    if (NIL_P(klass)) {
+	rb_raise(rb_eTypeError, "no class to undef method");
+    }
+
+    rb_frozen_class_p((VALUE)klass);
+
     const char *name_str = rb_id2name(name);
     SEL sel0 = rb_vm_name_to_sel(name_str, 0);
     SEL sel1 = rb_vm_name_to_sel(name_str, 1);
@@ -4224,6 +4238,9 @@ rb_vm_run_under(VALUE klass, VALUE self, const char *fname, NODE *node,
 	    klass = (VALUE)o->klass;
 	}
     }
+    if (NIL_P(klass)) {
+	klass = 0;
+    }
     if (self != 0) {
 	vm->set_current_top_object(self);
     }
@@ -4706,29 +4723,68 @@ extern "C"
 VALUE
 rb_exec_recursive(VALUE (*func) (VALUE, VALUE, int), VALUE obj, VALUE arg)
 {
-    return GET_VM()->exec_recursive(func, obj, arg);
+    return GET_VM()->exec_recursive(func, obj, arg, 0);
+}
+
+extern "C"
+VALUE
+rb_exec_recursive_outer(VALUE (*func) (VALUE, VALUE, int), VALUE obj, VALUE arg)
+{
+    return GET_VM()->exec_recursive(func, obj, arg, 1);
+}
+
+void
+RoxorVM::remove_recursive_object(VALUE obj)
+{
+    std::vector<VALUE>::iterator iter =
+	std::find(recursive_objects.begin(), recursive_objects.end(), obj);
+    assert(iter != recursive_objects.end());
+    recursive_objects.erase(iter);
 }
 
 VALUE
 RoxorVM::exec_recursive(VALUE (*func) (VALUE, VALUE, int), VALUE obj,
-	VALUE arg)
+	VALUE arg, int outer)
 {
     std::vector<VALUE>::iterator iter =
 	std::find(recursive_objects.begin(), recursive_objects.end(), obj);
-    if (iter != recursive_objects.end()) {
-	// Object is already being iterated!
-	return (*func) (obj, arg, Qtrue);
+    try {
+	VALUE ret = Qnil;
+	if (iter != recursive_objects.end()) {
+	    // Object is already being iterated!
+	    ret = (*func) (obj, arg, Qtrue);
+	    if (outer) {
+		// throw the result value of outer loop
+		throw ret;
+	    }
+	    return ret;
+	}
+
+	recursive_objects.push_back(obj);
+	try {
+	    ret = (*func) (obj, arg, Qfalse);
+	}
+	catch (VALUE ret) {
+	    // catch and rethrow the value of outer loop
+	    throw;
+	}
+	catch (...) {
+	    remove_recursive_object(obj);
+	    throw;
+	}
+	remove_recursive_object(obj);
+	return ret;
+    }
+    catch (VALUE ret) {
+	// catch the value of outer loop
+	if (!recursive_objects.empty()) {
+	    recursive_objects.pop_back();
+	    throw;
+	}
+	return ret;
     }
 
-    recursive_objects.push_back(obj);
-    // XXX the function is not supposed to raise an exception.
-    VALUE ret = (*func) (obj, arg, Qfalse);
-
-    iter = std::find(recursive_objects.begin(), recursive_objects.end(), obj);
-    assert(iter != recursive_objects.end());
-    recursive_objects.erase(iter);
-
-    return ret;
+    return Qnil; /* not reached */
 }
 
 extern "C"

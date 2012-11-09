@@ -1,8 +1,9 @@
-/* 
+/*
  * MacRuby implementation of Ruby 1.9's io.c.
  *
  * This file is covered by the Ruby license. See COPYING for more details.
- * 
+ *
+ * Copyright (C) 2012, The MacRuby Team. All rights reserved.
  * Copyright (C) 2007-2011, Apple Inc. All rights reserved.
  * Copyright (C) 1993-2007 Yukihiro Matsumoto
  * Copyright (C) 2000 Network Applied Communication Laboratory, Inc.
@@ -30,6 +31,10 @@
 #include <sys/param.h>
 #include <sys/syscall.h>
 #include <spawn.h>
+
+#if !defined NOFILE
+# define NOFILE 64
+#endif
 
 #define IS_FD_OF_STDIO(x) (x <= 2)
 #define CLOSE_FD(fd)					\
@@ -88,6 +93,8 @@ struct foreach_arg {
 
 #define argf_of(obj) (*(struct argf *)DATA_PTR(obj))
 #define ARGF argf_of(argf)
+
+static int max_file_descriptor = NOFILE;
 
 static VALUE
 pop_last_hash(int *argc_p, VALUE *argv)
@@ -263,6 +270,18 @@ convert_mode_string_to_oflags(VALUE s)
     }
     StringValue(s);
     return convert_fmode_to_oflags(convert_mode_string_to_fmode(s));
+}
+
+int
+rb_io_modestr_fmode(const char *modestr)
+{
+    return convert_mode_string_to_fmode(rb_str_new2(modestr));
+}
+
+int
+rb_io_modestr_oflags(const char *modestr)
+{
+    return convert_mode_string_to_oflags(rb_str_new2(modestr));
 }
 
 static int
@@ -474,6 +493,40 @@ prep_io(int fd, int mode, VALUE klass, const char *path)
     return io;
 }
 
+void
+rb_io_synchronized(rb_io_t *io_struct)
+{
+    rb_io_check_initialized(io_struct);
+    io_struct->mode |= FMODE_SYNC;
+}
+
+void
+rb_close_before_exec(int lowfd, int maxhint, VALUE noclose_fds)
+{
+    int fd, ret;
+    int max = max_file_descriptor;
+    if (max < maxhint)
+        max = maxhint;
+    for (fd = lowfd; fd <= max; fd++) {
+        if (!NIL_P(noclose_fds) &&
+            RTEST(rb_hash_lookup(noclose_fds, INT2FIX(fd))))
+            continue;
+#ifdef FD_CLOEXEC
+	ret = fcntl(fd, F_GETFD);
+	if (ret != -1 && !(ret & FD_CLOEXEC)) {
+            fcntl(fd, F_SETFD, ret|FD_CLOEXEC);
+        }
+#else
+	ret = close(fd);
+#endif
+#define CONTIGUOUS_CLOSED_FDS 20
+        if (ret != -1) {
+	    if (max < fd + CONTIGUOUS_CLOSED_FDS)
+		max = fd + CONTIGUOUS_CLOSED_FDS;
+	}
+    }
+}
+
 /*
  *  call-seq:
  *     ios.syswrite(string)   => integer
@@ -558,6 +611,7 @@ io_write(VALUE io, SEL sel, VALUE data)
     rb_io_t *io_struct = ExtractIOStruct(io);
     rb_io_assert_writable(io_struct);
 
+    rb_thread_fd_writable(io_struct->write_fd);
     ssize_t code = write(io_struct->write_fd, buffer, length);
     if (code == -1) {
 	rb_sys_fail("write() failed");
@@ -2594,6 +2648,7 @@ io_from_spawning_new_process(VALUE klass, VALUE prog, VALUE mode)
 	rb_sys_fail("posix_spawn() failed");
     }
 
+    StringValue(mode);
     io_struct->fd = fd_r[0];
     io_struct->pid = pid;
     io_struct->mode = mode;
@@ -3060,7 +3115,8 @@ rb_io_init_copy(VALUE dest, SEL sel, VALUE origin)
 VALUE
 rb_io_printf(VALUE out, SEL sel, int argc, VALUE *argv)
 {
-    return rb_io_write(out, rb_f_sprintf(argc, argv));
+    rb_io_write(out, rb_f_sprintf(argc, argv));
+    return Qnil;
 }
 
 /*
@@ -3371,11 +3427,16 @@ static VALUE
 rb_obj_display(VALUE self, SEL sel, int argc, VALUE *argv)
 {
     VALUE port;
-    rb_scan_args(argc, argv, "01", &port);
-    if (NIL_P(port)) {
+
+    if (argc == 0) {
 	port = rb_stdout;
     }
-    return rb_io_write(port, self);
+    else {
+	rb_scan_args(argc, argv, "01", &port);
+    }
+    rb_io_write(port, self);
+
+    return Qnil;
 }
 
 // static void
@@ -3441,6 +3502,7 @@ rb_io_initialize(VALUE io, SEL sel, int argc, VALUE *argv)
     }
 
     ofmode = convert_oflags_to_fmode(oflags);
+    mode = rb_check_string_type(mode);
     if (NIL_P(mode)) {
 	mode_flags = ofmode;
     }
@@ -4315,6 +4377,8 @@ rb_io_s_pipe(VALUE recv, SEL sel, int argc, VALUE *argv)
 
     rd = prep_io(fd[0], FMODE_READABLE, recv, NULL);
     wr = prep_io(fd[1], FMODE_WRITABLE, recv, NULL);
+    rb_io_t *io_struct_wr = ExtractIOStruct(wr);
+    rb_io_synchronized(io_struct_wr);
 
     VALUE ret = rb_assoc_new(rd, wr);
     if (rb_block_given_p()) {
@@ -5052,6 +5116,10 @@ opt_i_get(ID id, VALUE *var)
 static VALUE
 argf_inplace_mode_set(VALUE argf, SEL sel, VALUE val)
 {
+    if (rb_safe_level() >= 1 && OBJ_TAINTED(val)) {
+	rb_insecure_operation();
+    }
+
     if (!RTEST(val)) {
 	if (ARGF.inplace != NULL) {
 	    free(ARGF.inplace);
@@ -5260,7 +5328,7 @@ Init_IO(void)
     rb_objc_define_module_function(rb_mKernel, "`", rb_f_backquote, 1);
 
     rb_objc_define_module_function(rb_mKernel, "p", rb_f_p, -1);
-    rb_objc_define_module_function(rb_mKernel, "display", rb_obj_display, -1);
+    rb_objc_define_method(rb_mKernel, "display", rb_obj_display, -1);
 
     rb_cIO = rb_define_class("IO", rb_cObject);
     rb_include_module(rb_cIO, rb_mEnumerable);

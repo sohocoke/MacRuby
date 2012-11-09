@@ -1,12 +1,13 @@
 /*
  * This file is covered by the Ruby license. See COPYING for more details.
- * 
+ *
+ * Copyright (C) 2012, The MacRuby Team. All rights reserved.
  * Copyright (C) 2007-2011, Apple Inc. All rights reserved.
  * Copyright (C) 1993-2007 Yukihiro Matsumoto
  */
 
 #define RUBY_ENGINE 		"macruby"
-#define MACRUBY_VERSION 	"0.12"
+#define MACRUBY_VERSION 	"0.13"
 
 #define RUBY_VERSION 		"1.9.2"
 #define RUBY_RELEASE_DATE 	"2008-06-03"
@@ -17,7 +18,7 @@
 #define RUBY_VERSION_MAJOR 	1
 #define RUBY_VERSION_MINOR 	9
 #define RUBY_VERSION_TEENY 	0
-#define RUBY_RELEASE_YEAR 	2008
+#define RUBY_RELEASE_YEAR 	2012
 #define RUBY_RELEASE_MONTH 	6
 #define RUBY_RELEASE_DAY 	3
 
@@ -31,8 +32,8 @@ RUBY_EXTERN const char ruby_description[];
 RUBY_EXTERN const char ruby_copyright[];
 #endif
 
-#define RUBY_AUTHOR 		"Apple Inc."
-#define RUBY_BIRTH_YEAR 	2007
+#define RUBY_AUTHOR 		"The MacRuby Team"
+#define RUBY_BIRTH_YEAR 	2008
 
 #ifndef RUBY_REVISION
 # define RUBY_REVISION 0

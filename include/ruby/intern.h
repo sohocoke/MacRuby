@@ -1,6 +1,7 @@
 /*
  * This file is covered by the Ruby license. See COPYING for more details.
  *
+ * Copyright (C) 2012, The MacRuby Team. All rights reserved.
  * Copyright (C) 2007-2010, Apple Inc. All rights reserved
  * Copyright (C) 1993-2007 Yukihiro Matsumoto
  * Copyright (C) 2000  Network Applied Communication Laboratory, Inc.
@@ -42,6 +43,7 @@ VALUE rb_ary_freeze(VALUE);
 VALUE rb_ary_aref(int, VALUE *, VALUE);
 VALUE rb_ary_subseq(VALUE, long, long);
 void rb_ary_store(VALUE, long, VALUE);
+void rb_ary_modify(VALUE ary);
 VALUE rb_ary_dup(VALUE);
 VALUE rb_ary_to_ary(VALUE);
 VALUE rb_ary_push(VALUE, VALUE);
@@ -269,6 +271,7 @@ VALUE rb_thread_local_aset(VALUE, ID, VALUE);
 void rb_thread_atfork(void);
 void rb_thread_atfork_before_exec(void);
 VALUE rb_exec_recursive(VALUE(*)(VALUE, VALUE, int),VALUE,VALUE);
+VALUE rb_exec_recursive_outer(VALUE (*)(VALUE, VALUE, int), VALUE, VALUE);
 
 /* file.c */
 VALUE rb_file_expand_path(VALUE, VALUE);
@@ -421,11 +424,15 @@ VALUE rb_exec_arg_init(int argc, VALUE *argv, int accept_shell, struct rb_exec_a
 int rb_exec_arg_addopt(struct rb_exec_arg *e, VALUE key, VALUE val);
 void rb_exec_arg_fixup(struct rb_exec_arg *e);
 int rb_run_exec_options(const struct rb_exec_arg *e, struct rb_exec_arg *s);
+int rb_run_exec_options_err(const struct rb_exec_arg *e, struct rb_exec_arg *s, char*, size_t);
 int rb_exec(const struct rb_exec_arg*);
+int rb_exec_err(const struct rb_exec_arg*, char*, size_t);
 rb_pid_t rb_fork(int*, int (*)(void*), void*, VALUE);
+rb_pid_t rb_fork_err(int*, int (*)(void*, char*, size_t), void*, VALUE, char*, size_t);
 rb_pid_t rb_waitpid(rb_pid_t pid, int *status, int flags);
 void rb_syswait(rb_pid_t pid);
 rb_pid_t rb_spawn(int, VALUE*);
+rb_pid_t rb_spawn_err(int, VALUE*, char*, size_t);
 VALUE rb_detach_process(rb_pid_t pid);
 
 /* range.c */
@@ -555,6 +562,8 @@ void rb_str_setter(VALUE, ID, VALUE*);
 VALUE rb_str_intern(VALUE);
 VALUE rb_sym_to_s(VALUE);
 VALUE rb_str_length(VALUE);
+VALUE rb_str_match(VALUE, VALUE);
+VALUE rb_str_succ(VALUE);
 
 // Return a string object appropriate for bstr_ calls. This does nothing for
 // data/binary RubyStrings.

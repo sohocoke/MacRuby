@@ -1,6 +1,7 @@
 /*
  * This file is covered by the Ruby license. See COPYING for more details.
  *
+ * Copyright (C) 2012, The MacRuby Team. All rights reserved.
  * Copyright (C) 2007-2010, Apple Inc. All rights reserved
  * Copyright (C) 1993-2007 Yukihiro Matsumoto
  */
@@ -56,6 +57,9 @@ NORETURN(void rb_eof_error(void));
 
 long rb_io_primitive_read(struct rb_io_t *io_struct, char *buffer, long len);
 
+int rb_io_modestr_fmode(const char *modestr);
+int rb_io_modestr_oflags(const char *modestr);
+void rb_io_synchronized(rb_io_t*);
 int rb_io_wait_readable(int fd);
 int rb_io_wait_writable(int fd);
 int rb_io_read_pending(rb_io_t *io_struct);

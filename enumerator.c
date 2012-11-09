@@ -1,6 +1,7 @@
 /*
  * This file is covered by the Ruby license. See COPYING for more details.
- * 
+ *
+ * Copyright (C) 2012, The MacRuby Team. All rights reserved.
  * Copyright (C) 2007-2011, Apple Inc. All rights reserved.
  * Copyright (C) 2001-2003 Akinori MUSHA
  */
@@ -293,7 +294,7 @@ enumerator_block_call(VALUE obj, VALUE (*func)(ANYARGS), VALUE arg)
 
     e = enumerator_ptr(obj);
     if (e->args != 0) {
-	argc = RARRAY_LEN(e->args);
+	argc = RARRAY_LENINT(e->args);
 	argv = RARRAY_PTR(e->args);
     }
     return rb_objc_block_call(e->obj, e->sel, argc, (VALUE *)argv,

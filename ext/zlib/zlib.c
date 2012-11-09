@@ -1,8 +1,9 @@
-/* 
+/*
  * MacRuby Zlib API.
  *
  * This file is covered by the Ruby license. See COPYING for more details.
- * 
+ *
+ * Copyright (C) 2012, The MacRuby Team. All rights reserved.
  * Copyright (C) 2007-2010, Apple Inc. All rights reserved.
  * Copyright (C) UENO Katsuhiro 2000-2003
  */
@@ -473,6 +474,12 @@ zstream_expand_buffer_into(struct zstream *z, int size)
 {
     if (NIL_P(z->buf)) {
         GC_WB(&z->buf, rb_bstr_new());
+	if (size <= 0) {
+	    rb_bstr_resize(z->buf, 1);
+	}
+	else {
+	    rb_bstr_resize(z->buf, size);
+	}
         z->buf_filled = 0;
         z->stream.next_out = BSTRING_PTR_BYTEF(z->buf);
         z->stream.avail_out = size;
